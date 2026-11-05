@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Switches that number their BRIDGE-MIB forwarding table instead of indexing it by MAC are read now. They used to come back empty, so nothing was ever placed under them.
+
 ## 0.3.0
 
 ### Added
