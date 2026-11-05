@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
@@ -17,7 +18,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.netorbit import manage
 from custom_components.netorbit.const import DOMAIN
+from custom_components.netorbit.coordinator import NetOrbitCoordinator
 
 from .conftest import GATEWAY, MAC_A, MAC_B, MAC_C, SUBNET
 
@@ -411,6 +414,29 @@ async def test_unload(hass: HomeAssistant, fake_net) -> None:
     await _setup(hass, entry)
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_first_change_after_setup_is_applied(hass: HomeAssistant, fake_net) -> None:
+    """Options NetOrbit saves itself while setting up (a hub's MAC learned from ARP) must not swallow the first
+    change a person makes. The update listener clears NetOrbit's "that change was mine" flag, so it has to be in
+    place before the first refresh. Today's first refresh doesn't sweep, so the test has it save something."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    first_refresh = NetOrbitCoordinator.async_config_entry_first_refresh
+
+    async def refresh_that_saves(coord: NetOrbitCoordinator) -> None:
+        await first_refresh(coord)
+        opts = manage.copy_options(coord.opts)
+        manage.hub_by_id(opts, "gateway")["mac"] = "00:00:5e:00:53:01"
+        coord._commit(opts)  # noqa: SLF001
+
+    with patch.object(NetOrbitCoordinator, "async_config_entry_first_refresh", refresh_that_saves):
+        await _setup(hass, entry)
+    devices = {**entry.options["devices"], MAC_B: {**entry.options["devices"].get(MAC_B, {}), "tracked": True, "name": "Hall printer"}}
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "devices": devices})
+    await hass.async_block_till_done()
+    assert "Hall printer" in _node_states(hass)
 
 
 async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> None:
