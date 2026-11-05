@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- SNMP requests go only to hosts on the map's subnet. The ARP table also lists hosts on other networks that Home Assistant's machine is attached to (another VLAN, container bridges), and every sweep sent them SNMP requests. Hubs added by hand with an address on another network are still asked.
+
 ## 0.3.0
 
 ### Added

@@ -66,6 +66,30 @@ async def test_snmp_builds_the_layout(hass: HomeAssistant, fake_net) -> None:
     assert "snmp" in _summary(hass).attributes["sources"]
 
 
+async def test_snmp_probes_stay_on_the_subnet(hass: HomeAssistant, fake_net) -> None:
+    """ARP entries from other networks (another VLAN, a container bridge) are not asked; a hub elsewhere is."""
+    _network(fake_net)
+    fake_net.arp["198.51.100.7"] = "00:00:5e:00:53:41"  # a host on another VLAN the machine is also on
+    fake_net.arp["203.0.113.9"] = "00:00:5e:00:53:42"  # a container bridge
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    asked = {ip for ip, _ in fake_net.probed}
+    assert "192.0.2.2" in asked and "192.0.2.10" in asked
+    assert not asked & {"198.51.100.7", "203.0.113.9"}, asked
+
+    # A switch on another network, set up by hand as a hub of this map, is still asked.
+    await hass.services.async_call(DOMAIN, "add_hub", {"name": "Garage switch", "type": "switch", "ip": "198.51.100.6"}, blocking=True)
+    await hass.async_block_till_done()
+    fake_net.probed.clear()
+    entry.runtime_data._last_snmp_probe = None  # due again
+    entry.runtime_data.request_sweep()
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    asked = {ip for ip, _ in fake_net.probed}
+    assert "198.51.100.6" in asked
+    assert not asked & {"198.51.100.7", "203.0.113.9"}, asked
+
+
 async def test_custom_community(hass: HomeAssistant, fake_net) -> None:
     _network(fake_net, community="s3cretRO")
     fake_net.dns["192.0.2.2"] = "gs308-core.lan"  # a switch model name: NetOrbit suggests it as a hub

@@ -428,15 +428,19 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             self._registry = registry_by_mac(self.hass)
             self._tracker_names = tracker_names_by_mac(self.hass)
             self._ping_names = ping_names_by_ip(self.hass)
+            # Ask only hosts on this map's subnet. The ARP table also holds other networks the host
+            # Home Assistant runs on is attached to (another VLAN, container bridges); hubs set up
+            # with an address elsewhere are still asked (_snmp_probe adds them).
+            live = replied | (set(arp) & host_set)
             if self.opts[CONF_SNMP_ENABLED]:
                 self.set_scan(phase="snmp")
-                await self._snmp_probe(now, replied | set(arp))
+                await self._snmp_probe(now, live)
             await self._detect_hubs()
             if self.opts[CONF_SNMP_ENABLED] and self.opts.get(CONF_SNMP_COMMUNITY):
                 # Gear that detection just suggested may only answer to the custom community.
                 # Ask it now, then look again, so it doesn't wait for the next sweep.
                 before = set(self._community_asked)
-                await self._snmp_probe(now, replied | set(arp))
+                await self._snmp_probe(now, live)
                 if self._community_asked != before:
                     await self._detect_hubs()
             # Read tables after detection so switches found in this sweep count straight away.
