@@ -157,7 +157,7 @@ def _tools() -> list[llm.Tool]:
             vol.Schema({
                 vol.Optional("device"): cv.string, vol.Optional("name"): cv.string,
                 vol.Optional("type", default="access_point"): hub_type, vol.Optional("parent"): cv.string,
-                vol.Optional("ip"): cv.string, vol.Optional("mac"): cv.string,
+                vol.Optional("ip"): actions.ipv4_address, vol.Optional("mac"): actions.mac_address,
             }),
             lambda h, e, c, a: actions.add_hub(h, e, c, a.get("name"), a.get("type", "access_point"), a.get("parent"), a.get("ip"), a.get("mac"), a.get("device")),
             idempotent=False,

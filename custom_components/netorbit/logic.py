@@ -45,6 +45,16 @@ def normalize_mac(mac: str | None) -> str | None:
     return out if _MAC_RE.match(out) else None
 
 
+def normalize_ipv4(ip: str | None) -> str | None:
+    """Return a canonical IPv4 address, or None if the text is not one (a hostname, IPv6, junk)."""
+    if not ip:
+        return None
+    try:
+        return str(ipaddress.IPv4Address(str(ip).strip()))
+    except ipaddress.AddressValueError:
+        return None
+
+
 def is_random_mac(mac: str | None) -> bool:
     """True when the MAC is locally administered (phones and laptops randomize these)."""
     mac = normalize_mac(mac)

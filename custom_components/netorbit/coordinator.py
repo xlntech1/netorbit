@@ -79,6 +79,7 @@ from .logic import (
     guess_icon_from,
     is_random_mac,
     keys_answering,
+    normalize_ipv4,
     normalize_mac,
     parse_proc_arp,
     rollup_status,
@@ -317,6 +318,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     # ----- update ------------------------------------------------------------
 
     async def _async_update_data(self) -> NetOrbitData:
+        from icmplib import ICMPLibError  # noqa: PLC0415
+
         now = dt_util.utcnow()
         due = self._last_sweep is None or now - self._last_sweep >= timedelta(seconds=self.opts[CONF_DISCOVERY_INTERVAL])
         # A sweep someone asked for always runs (after any sweep in progress). A sweep that is
@@ -329,7 +332,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if sweep_due:
                 await self._sweep(now)
             alive = await self._ping_tracked()
-        except OSError as err:
+        except (OSError, ICMPLibError) as err:
             raise UpdateFailed(f"Network error: {err}") from err
 
         self._note_internet(now, [k for k, _ in alive if k.startswith(f"{INTERNET_KEY}:")])
@@ -869,12 +872,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         """Ping hubs and tracked devices. Returns [(key, ip)] that answered."""
         from icmplib import async_multiping  # noqa: PLC0415
 
+        # Only addresses are pinged. A name would make icmplib resolve it and raise when it cannot,
+        # failing the whole refresh. Services refuse names now, but an older install may still hold one.
         targets: dict[str, str] = {}
         for hub in self.opts[CONF_HUBS]:
-            if hub.get("host"):
+            if normalize_ipv4(hub.get("host")):
                 targets[f"hub:{hub['id']}"] = hub["host"]
         for key, ip in self._tracked_targets().items():
-            if ip:
+            if normalize_ipv4(ip):
                 targets[key] = ip
         if self.opts[CONF_CHECK_INTERNET]:
             for ip in INTERNET_TARGETS:

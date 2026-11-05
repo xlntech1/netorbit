@@ -7,12 +7,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from . import manage
 from .const import CONF_DEVICES, CONF_HUBS, CONF_IGNORED, HUB_AP, INTERNET_KEY, ROOT_HUB_ID
-from .logic import extract_addresses, normalize_mac
+from .logic import extract_addresses, normalize_ipv4, normalize_mac
 
 if TYPE_CHECKING:
     from .coordinator import NetOrbitCoordinator
@@ -20,6 +23,26 @@ if TYPE_CHECKING:
 
 class ActionError(manage.ManageError):
     """Raised when a request cannot be carried out."""
+
+
+def ipv4_address(value: Any) -> str:
+    """Validator for service and tool fields: an IPv4 address, in its canonical form.
+
+    Names are refused on purpose. NetOrbit pings by address, and a name that does not resolve
+    makes icmplib raise, which fails every refresh and keeps the entry from loading.
+    """
+    ip = normalize_ipv4(cv.string(value))
+    if not ip:
+        raise vol.Invalid(f"{value} is not an IPv4 address")
+    return ip
+
+
+def mac_address(value: Any) -> str:
+    """Validator for service and tool fields: a MAC address, normalized to lowercase colon form."""
+    mac = normalize_mac(cv.string(value))
+    if not mac:
+        raise vol.Invalid(f"{value} is not a MAC address")
+    return mac
 
 
 async def _save(hass: HomeAssistant, entry: ConfigEntry, coord: NetOrbitCoordinator, opts: dict[str, Any]) -> None:
@@ -312,7 +335,7 @@ async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool 
 async def track(hass, entry, coord, mac: str | None = None, ip: str | None = None, **fields: Any) -> dict[str, Any]:
     key = coord.find_key(mac, ip)
     if key is None or key not in (coord._seen):  # noqa: SLF001
-        if not mac and not ip:
+        if not normalize_mac(mac) and not ip:
             raise ActionError("Give a MAC or IP address")
         key = coord.seed_device(mac, ip)
     opts = _opts(coord)

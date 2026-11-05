@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- The `ip` and `mac` fields of services and assistant tools only take addresses. A hostname used to fail every refresh and keep the entry from loading after a restart, and a malformed MAC created a phantom device. Installs that already stored a name recover after updating.
+
 ## 0.3.0
 
 ### Added

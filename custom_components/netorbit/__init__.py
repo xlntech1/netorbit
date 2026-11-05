@@ -50,17 +50,17 @@ ENTRY = {vol.Optional("config_entry_id"): cv.string}
 DEVICE_LIST = vol.All(cv.ensure_list, [cv.string])
 
 SCHEMAS: dict[str, vol.Schema] = {
-    SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
+    SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): actions.mac_address, vol.Optional("ip"): actions.ipv4_address,
                                vol.Optional("name"): cv.string, vol.Optional("icon"): cv.icon,
                                vol.Optional("hub"): cv.string, vol.Optional("sleepy"): cv.boolean}),
-    SERVICE_IGNORE: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
+    SERVICE_IGNORE: vol.Schema({**ENTRY, vol.Optional("mac"): actions.mac_address, vol.Optional("ip"): actions.ipv4_address,
                                 vol.Optional("device"): cv.string}),
     SERVICE_SCAN: vol.Schema(ENTRY),
     SERVICE_ASSIGN: vol.Schema({**ENTRY, vol.Required("device"): DEVICE_LIST, vol.Required("hub"): cv.string}),
     SERVICE_RESET: vol.Schema({**ENTRY, vol.Required("device"): DEVICE_LIST}),
     SERVICE_ADD_HUB: vol.Schema({**ENTRY, vol.Optional("name"): cv.string, vol.Optional("type", default="access_point"): vol.In(HUB_TYPES),
-                                 vol.Optional("parent"): cv.string, vol.Optional("ip"): cv.string,
-                                 vol.Optional("mac"): cv.string, vol.Optional("device"): cv.string}),
+                                 vol.Optional("parent"): cv.string, vol.Optional("ip"): actions.ipv4_address,
+                                 vol.Optional("mac"): actions.mac_address, vol.Optional("device"): cv.string}),
     SERVICE_REMOVE_HUB: vol.Schema({**ENTRY, vol.Required("hub"): cv.string}),
     SERVICE_EXPORT: vol.Schema(ENTRY),
     SERVICE_IMPORT: vol.Schema({**ENTRY, vol.Required("data"): dict, vol.Optional("replace", default=False): cv.boolean}),

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
+import voluptuous as vol
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
@@ -104,6 +105,29 @@ async def test_auto_mode_discovers_and_tracks(hass: HomeAssistant, fake_net) -> 
     assert _summary(hass).state == "2"
     # the very first sweep fills the map quietly
     assert events == []
+
+
+async def test_services_reject_hostnames_and_bad_macs(hass: HomeAssistant, fake_net) -> None:
+    """A hostname would reach icmplib and fail every refresh; a bad MAC used to create a phantom 'ip:None' device."""
+    fake_net.alive = {GATEWAY}
+    entry = _entry("manual")
+    await _setup(hass, entry)
+    for service, data in (
+        ("track_device", {"ip": "example-host"}),
+        ("track_device", {"mac": "not-a-mac"}),
+        ("track_device", {"ip": "192.0.2.300"}),
+        ("ignore_device", {"ip": "example-host"}),
+        ("add_hub", {"name": "Shed AP", "ip": "shed-ap"}),
+    ):
+        with pytest.raises(vol.Invalid):
+            await hass.services.async_call(DOMAIN, service, data, blocking=True)
+    coord = entry.runtime_data
+    assert coord.opts["devices"] == {} and [h["id"] for h in coord.opts["hubs"]] == ["gateway"]
+    assert "ip:None" not in coord._seen  # noqa: SLF001
+
+    # Common spellings are accepted and stored in one form.
+    await hass.services.async_call(DOMAIN, "track_device", {"mac": "00-00-5E-00-53-0B", "ip": " 192.0.2.11 "}, blocking=True)
+    assert entry.options["devices"][MAC_B]["host"] == "192.0.2.11"
 
 
 async def test_new_device_event_and_manual_mode(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
