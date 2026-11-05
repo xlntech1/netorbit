@@ -1119,18 +1119,20 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.strictEqual((await ws()).length, wsBefore, "no entity rename when NetOrbit's own save failed");
     console.log("rename errors ok");
 
-    // The details popup outside Edit layout renames a device the same way, after saving its fields.
+    // The details popup outside Edit layout saves the name with the fields in one call, and the name set in Home
+    // Assistant follows as from the Edit layout menu.
     await rp.evaluate(() => { window.callFail = null; });
     await c8.locator(".editbtn").click();
     const wsNow = (await ws()).length;
     await open();
     await c8.locator(".pop .ed").click();
     await c8.locator(".pop input.name").fill("Lounge TV");
+    const detailCalls = (await calls()).length;
     await c8.locator(".pop .save").click();
     await rp.waitForFunction((n) => window.wsCalls.length === n + 1, wsNow);
-    const sent = (await calls()).slice(-2);
-    assert.deepStrictEqual(sent.map((c) => c[1]), ["update_device", "track_device"], "details Edit saves the fields, then renames");
-    assert.strictEqual(sent[1][2].name, "Lounge TV", "NetOrbit's own name is saved");
+    const sent = (await calls()).slice(detailCalls);
+    assert.deepStrictEqual(sent.map((c) => c[1]), ["update_device"], "details Edit saves the fields and the name in one call");
+    assert.strictEqual(sent[0][2].name, "Lounge TV", "NetOrbit's own name is saved");
     assert.strictEqual((await ws()).at(-1).name, "Lounge TV", "the name set in Home Assistant follows");
     await shows("Lounge TV");
     const untouched = (await calls()).length;
