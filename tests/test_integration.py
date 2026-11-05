@@ -439,6 +439,22 @@ async def test_first_change_after_setup_is_applied(hass: HomeAssistant, fake_net
     assert "Hall printer" in _node_states(hass)
 
 
+async def test_a_save_that_changes_nothing_does_not_swallow_the_next_change(hass: HomeAssistant, fake_net) -> None:
+    """Home Assistant runs no update listener when the options didn't change, so nothing clears the flag."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    for _ in range(2):  # the second call saves the same name again
+        await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "name": "Printer"}, blocking=True)
+        await hass.async_block_till_done()
+    assert entry.runtime_data.internal_update is False
+    devices = {**entry.options["devices"], MAC_B: {**entry.options["devices"][MAC_B], "name": "Hall printer"}}
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "devices": devices})
+    await hass.async_block_till_done()
+    assert "Hall printer" in _node_states(hass)
+
+
 async def test_names_from_other_integrations(hass: HomeAssistant, fake_net) -> None:
     """Real names win over MAC-named duplicates; device trackers and ping sensors fill the gaps."""
     from homeassistant.helpers import device_registry as dr

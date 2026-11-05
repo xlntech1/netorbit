@@ -565,7 +565,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         """Save options NetOrbit changed itself, without triggering a second refresh."""
         self.opts = opts
         self.internal_update = True
-        self.hass.config_entries.async_update_entry(self.config_entry, options=opts)
+        if not self.hass.config_entries.async_update_entry(self.config_entry, options=opts):
+            # Nothing changed, so no update listener runs to clear the flag.
+            self.internal_update = False
 
     def _subnet_set(self, hosts: list[str]) -> set[str]:
         cached = getattr(self, "_hosts_cache", None)

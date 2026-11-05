@@ -9,6 +9,7 @@
 
 ### Fixed
 - The first change made in Settings after a restart was ignored when NetOrbit had saved something itself during its first sweep (a hub's MAC address, a DHCP move).
+- A change made in Settings no longer waits for the next ping round to show on the map when the change before it saved nothing new (a service call or an *Edit* that set what was already there).
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 

@@ -27,7 +27,9 @@ class ActionError(manage.ManageError):
 
 async def _save(hass: HomeAssistant, entry: ConfigEntry, coord: NetOrbitCoordinator, opts: dict[str, Any]) -> None:
     coord.internal_update = True
-    hass.config_entries.async_update_entry(entry, options=opts)
+    if not hass.config_entries.async_update_entry(entry, options=opts):
+        # Nothing changed, so no update listener runs to clear the flag. Left set, it would swallow the next change.
+        coord.internal_update = False
     coord.apply_options(entry)
     # Redraw the map now from what NetOrbit already knows, then check the network in the
     # background. Waiting for a ping round here made every drag take a second or two.
