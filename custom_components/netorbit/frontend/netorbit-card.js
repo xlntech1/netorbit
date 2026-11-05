@@ -76,15 +76,27 @@ function noHeight(v) {
   return s;
 }
 
-/** What a "Managed by" text points at: a web link, a node on the map, or just words. Exported for tests. */
-function noLink(text, nodes) {
+/** What a "Managed by" text points at: a web link, a node on the map, or just words. Exported for tests.
+ *  Names and keys are tried first, then IP and MAC, then DNS and Bonjour names, so a device announcing "nas" can't
+ *  win over the hub labelled NAS. A tie within the first step that matches stays plain text, and a node never
+ *  points at itself (selfKey). */
+function noLink(text, nodes, selfKey) {
   const t = String(text || "").trim();
   if (!t) return { kind: "none" };
   if (/^https?:\/\/\S+$/i.test(t)) return { kind: "url", href: t };
   const low = t.toLowerCase();
-  const hit = Object.values(nodes || {}).find((n) => n && (n.kind === "hub" || n.kind === "device") &&
-    [n.label, n.key, n.key && n.key.replace(/^hub:/, ""), n.ip, n.mac, n.hostname, n.fqdn].some((v) => v && String(v).toLowerCase() === low));
-  return hit ? { kind: "node", key: hit.key } : { kind: "text" };
+  const cands = Object.values(nodes || {}).filter((n) => n && n.key && n.key !== selfKey && (n.kind === "hub" || n.kind === "device"));
+  const steps = [
+    (n) => [n.label, n.key, n.key.replace(/^hub:/, "")],
+    (n) => [n.ip, n.mac],
+    (n) => [n.hostname, n.fqdn],
+  ];
+  for (const values of steps) {
+    const keys = new Set(cands.filter((n) => values(n).some((v) => v && String(v).toLowerCase() === low)).map((n) => n.key));
+    if (keys.size === 1) return { kind: "node", key: [...keys][0] };
+    if (keys.size > 1) return { kind: "text" };
+  }
+  return { kind: "text" };
 }
 
 /** "Label: value" per line -> {label: value}; a line without a colon is an error. Exported for tests. */
@@ -2325,7 +2337,7 @@ class NetOrbitCard extends HTMLElement {
     const dns = n.fqdn || n.hostname;
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
     const row = (k, v) => (v ? `<span class="k">${noEsc(k)}</span><span class="v">${v}</span>` : "");
-    const link = noLink(n.managed_by, all);
+    const link = noLink(n.managed_by, all, n.key);
     const managed = !n.managed_by ? "" :
       link.kind === "url" ? `<a href="${noEsc(link.href)}" target="_blank" rel="noopener noreferrer">${noEsc(n.managed_by)}</a>` :
       link.kind === "node" ? `<a href="#" class="jump" data-key="${noEsc(link.key)}">${noEsc(n.managed_by)}</a> <span class="muted">on this map</span>` :

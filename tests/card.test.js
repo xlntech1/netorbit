@@ -553,6 +553,26 @@ test("managed by: a link, a node on the map, or words", () => {
   assert.deepStrictEqual(noLink("", nodes), { kind: "none" });
 });
 
+test("managed by: names first, then addresses, then DNS names; ties stay words; never itself", () => {
+  const nodes = {
+    "hub:nas": { key: "hub:nas", kind: "hub", label: "NAS", ip: "192.0.2.20" },
+    d1: { key: "d1", kind: "device", label: "Media box", hostname: "nas", ip: "192.0.2.21" },
+    d2: { key: "d2", kind: "device", label: "Printer", hostname: "printer", fqdn: "printer.example.net" },
+    d3: { key: "d3", kind: "device", label: "Camera", ip: "192.0.2.30" },
+    d4: { key: "d4", kind: "device", label: "Camera", ip: "192.0.2.31" },
+    d5: { key: "d5", kind: "device", label: "Spare", hostname: "lab" },
+    d6: { key: "d6", kind: "device", label: "Spare 2", hostname: "lab" },
+  };
+  assert.deepStrictEqual(noLink("nas", nodes), { kind: "node", key: "hub:nas" });
+  assert.deepStrictEqual(noLink("192.0.2.21", nodes), { kind: "node", key: "d1" });
+  assert.deepStrictEqual(noLink("printer.example.net", nodes), { kind: "node", key: "d2" });
+  assert.deepStrictEqual(noLink("Camera", nodes), { kind: "text" });
+  assert.deepStrictEqual(noLink("lab", nodes), { kind: "text" });
+  assert.deepStrictEqual(noLink("Printer", nodes, "d2"), { kind: "text" });
+  assert.deepStrictEqual(noLink("printer", nodes, "d2"), { kind: "text" });
+  assert.deepStrictEqual(noLink("Camera", nodes, "d3"), { kind: "node", key: "d4" });
+});
+
 test("extra fields parse one Label: value per line", () => {
   assert.deepStrictEqual(noParseFields("Location: Hall\n\nURL: https://192.0.2.1/x\nEmpty:"), { Location: "Hall", URL: "https://192.0.2.1/x", Empty: "" });
   assert.throws(() => noParseFields("no separator"), /Label: value/);

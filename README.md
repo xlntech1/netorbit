@@ -181,7 +181,7 @@ Under the integration's **Configure** menu:
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
 
-**Managed by and extra fields** are free text on any hub or device: a link to its admin page, the name of the switch or controller that manages it (the map jumps there), a location, a serial number, who owns it. Tap the device on the map to read them, and *Edit* (admins) to change them; `netorbit.update_device` and `netorbit.update_hub` set them too.
+**Managed by and extra fields** are free text on any hub or device: a link to its admin page, the name, IP or DNS name of the switch or controller that manages it (the map jumps there when exactly one other hub or device matches; names count before addresses, addresses before DNS names), a location, a serial number, who owns it. Tap the device on the map to read them, and *Edit* (admins) to change them; `netorbit.update_device` and `netorbit.update_hub` set them too.
 
 **Prefer DNS and Bonjour names** (off by default) puts the name your network gives a device first, before what other integrations call it, and uses it for hubs NetOrbit named itself, such as *Router*. Anything you renamed yourself keeps your name.
 
