@@ -2412,7 +2412,8 @@ class NetOrbitCard extends HTMLElement {
       try { fields = noParseFields(q(".fx").value); } catch (e) { q(".err").textContent = e.message; return; }
       // The box shows every field, so what is missing now has been removed.
       const data = { managed_by: q(".mb").value.trim(), fields: Object.assign(Object.fromEntries(Object.keys(n.fields || {}).map((k) => [k, null])), fields) };
-      const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
+      // Only device names have the 64-character limit; cutting a longer hub name would rename the hub.
+      const name = n.kind === "device" ? q(".name").value.trim().slice(0, NO_NAME_MAX) : q(".name").value.trim();
       const renamed = name !== String(n.label || "").trim().slice(0, NO_NAME_MAX);
       if (n.kind === "hub") {
         data.hub = n.key.replace(/^hub:/, "");

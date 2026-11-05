@@ -559,3 +559,22 @@ test("extra fields parse one Label: value per line", () => {
   assert.throws(() => noParseFields(": nothing before"), /Label: value/);
   assert.deepStrictEqual(noParseFields(""), {});
 });
+
+test("Edit in the details popup keeps a hub name longer than a device name may be", async () => {
+  const card = new globalThis.NetOrbitCard();
+  const calls = [];
+  card._call = (service, data) => { calls.push([service, data]); return Promise.resolve(true); };
+  card._closePop = () => {};
+  const el = () => { const l = {}; return { value: "", textContent: "", disabled: false, addEventListener: (t, f) => (l[t] = f), click: () => l.click() }; };
+  const parts = { ".name": el(), ".mb": el(), ".fx": el(), ".err": el(), ".save": el(), ".back": el() };
+  card._openPop = () => ({ isConnected: true, classList: { add() {} }, querySelector: (q) => parts[q] });
+  const long = "Second floor east wing network closet rack two patch panel switch A";
+  assert.ok(long.length > 64);
+  const hub = { key: "hub:closet", kind: "hub", label: long, fields: {} };
+  card._detailsEdit(hub, {}, {}, () => {}, {}, {}, () => "");
+  parts[".name"].value = long;
+  parts[".fx"].value = "Rack: 2";
+  parts[".save"].click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepStrictEqual(calls, [["update_hub", { managed_by: "", fields: { Rack: "2" }, hub: "closet" }]], "saving only the fields leaves the name alone");
+});

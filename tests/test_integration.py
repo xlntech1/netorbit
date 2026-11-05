@@ -467,6 +467,32 @@ async def test_old_installs_look_names_up_again(hass: HomeAssistant, fake_net) -
     assert "Office Mac" in _node_states(hass)
 
 
+async def test_dns_timeout_keeps_the_names_it_had(hass: HomeAssistant, fake_net) -> None:
+    """A reverse lookup that times out keeps the DNS name and the hostname that came with it."""
+    fake_net.alive = {GATEWAY, "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.12": MAC_C}
+    fake_net.dns = {"192.0.2.12": "office-pc.home.example."}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+
+    def pc():
+        return next(s for s in _node_states(hass).values() if s.attributes["mac"] == MAC_C.upper())
+
+    assert (pc().attributes["fqdn"], pc().attributes["hostname"]) == ("office-pc.home.example", "office-pc")
+
+    class NoAnswer(dict):
+        def get(self, key, default=None):
+            raise TimeoutError
+
+    fake_net.dns = NoAnswer()
+    fake_net.mdns["192.0.2.12"] = "Other-Name.local."
+    for rec in entry.runtime_data._seen.values():
+        rec.pop("dns_version", None)
+    await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert (pc().attributes["fqdn"], pc().attributes["hostname"]) == ("office-pc.home.example", "office-pc")
+
+
 def _internet(hass: HomeAssistant):
     return next((s for s in hass.states.async_all("sensor") if s.attributes.get("kind") == "internet"), None)
 

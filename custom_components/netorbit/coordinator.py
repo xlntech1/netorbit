@@ -611,6 +611,13 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         self.hass.async_add_executor_job(_reverse_dns, ip), DNS_TIMEOUT
                     )
                 except (TimeoutError, asyncio.TimeoutError):
+                    rec = self._seen[key]
+                    if rec.get("fqdn"):
+                        # No answer in time is not "no name": keep the DNS name and the hostname that came with it
+                        # until the next look.
+                        rec["dns_checked"] = now.isoformat()
+                        rec["dns_version"] = NAME_LOOKUP_VERSION
+                        return
                     name = None
                 host = short_hostname(name)
                 fqdn = name.strip().rstrip(".") if host and name else None
