@@ -93,6 +93,36 @@ async def test_custom_community(hass: HomeAssistant, fake_net) -> None:
     assert not told & {"192.0.2.10", "192.0.2.12"}, told
 
 
+async def test_one_lost_snmp_reply_keeps_the_switch_table(hass: HomeAssistant, fake_net) -> None:
+    """A probe that times out once must not cost a switch its table, and the layout behind it, for an hour."""
+    _network(fake_net, community="s3cretRO")
+    entry = _entry("auto", snmp_community="s3cretRO")
+    await _setup(hass, entry)
+    # Added by hand, so the switch's SNMP details live on the hub's own record only.
+    await hass.services.async_call(DOMAIN, "add_hub", {"name": "Core switch", "type": "switch", "ip": "192.0.2.2"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert "snmp" in _summary(hass).attributes["sources"]
+    assert _node_states(hass)["nas"].attributes["link"] == "hub:core_switch"
+
+    # One lost reply: the switch keeps its details and its last table.
+    answers, fake_net.snmp = fake_net.snmp, {}
+    await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert "snmp" in _summary(hass).attributes["sources"]
+
+    # Several misses in a row do mean it is gone.
+    for _ in range(2):
+        await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert "snmp" not in _summary(hass).attributes["sources"]
+
+    fake_net.snmp = answers
+    await hass.services.async_call(DOMAIN, "scan_now", {}, blocking=True)
+    await hass.async_block_till_done()
+    assert "snmp" in _summary(hass).attributes["sources"]
+
+
 async def test_suggestions_confirm_and_dismiss(hass: HomeAssistant, fake_net) -> None:
     _network(fake_net)
     fake_net.alive.add("192.0.2.21")

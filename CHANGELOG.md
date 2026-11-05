@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- One lost SNMP reply no longer costs a switch its details, and the layout behind it, for an hour. Its details are forgotten after three missed probes in a row, and a walk that returns nothing reuses the previous table.
+
 ## 0.3.0
 
 ### Added

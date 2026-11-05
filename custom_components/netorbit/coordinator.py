@@ -101,6 +101,7 @@ DNS_REFRESH = timedelta(hours=12)
 NAME_LOOKUP_VERSION = 2
 AUTO_PLACEMENT_TTL = timedelta(days=7)
 SNMP_CONCURRENCY = 32
+SNMP_PROBE_MISSES = 3  # hourly probes a hub may miss in a row before its SNMP details are forgotten
 
 # Sweep phases shown on the summary sensor while a scan runs, with a rough percentage for each.
 # "starting" is the moment between setup finishing and the background sweep taking over.
@@ -661,15 +662,25 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     # SNMP v2c sends the community in clear text. Your own community only goes to
                     # hubs and likely network gear; everything else is only asked with the factory default.
                     comms = self._communities() if ip in trusted else [SNMP_DEFAULT_COMMUNITY]
+                    keys = {by_ip.get(ip), hub_hosts.get(ip)} - {None}
                     for i, comm in enumerate(comms):
                         res = await self._snmp.probe(ip, comm)
                         if res:
-                            for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
+                            for key in keys:
                                 rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
                                 rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "object_id": res.object_id, "community": "custom" if (comm != SNMP_DEFAULT_COMMUNITY) else "default"}
+                                rec.pop("snmp_misses", None)
                             return
-                    for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
-                        self._seen.get(key, {}).pop("snmp", None)
+                    # A probe is one packet with a one second timeout and no retries. One lost reply must
+                    # not cost a switch its table for an hour: forget it only after several misses in a row.
+                    for key in keys:
+                        rec = self._seen.get(key)
+                        if not rec or "snmp" not in rec:
+                            continue
+                        rec["snmp_misses"] = rec.get("snmp_misses", 0) + 1
+                        if rec["snmp_misses"] >= SNMP_PROBE_MISSES:
+                            rec.pop("snmp", None)
+                            rec.pop("snmp_misses", None)
 
             await asyncio.gather(*(probe(ip) for ip in targets))
             self._community_asked |= {ip for ip in targets if ip in trusted}
@@ -686,6 +697,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             table = await self._snmp.mac_table(host, comm)
             if table:
                 tables[hub["id"]] = table
+            elif hub["id"] in self._tables:
+                # A walk that timed out keeps last sweep's table rather than moving everything behind the switch.
+                tables[hub["id"]] = self._tables[hub["id"]]
         return tables
 
     async def _read_ap_clients(self) -> dict[str, str]:
