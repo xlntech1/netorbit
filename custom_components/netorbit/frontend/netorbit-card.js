@@ -883,6 +883,8 @@ function noVideoType() {
 // The whole map in SVG units. Zooming shows a part of it with the same aspect ratio, so the card keeps its size.
 const NO_VIEW = { x: -70, y: -40, w: 1140, h: 1090 };
 const NO_ZOOM_MAX = 5;
+// A node popup left alone this long closes by itself (unless it holds unsaved changes); see _popAway.
+const NO_POP_IDLE_MS = 120000;
 
 /** The view after a zoom or pan gesture. Pure; exported for tests.
  *  `view` is the view the gesture started from (null = the whole map), `anchor` the map point that was under the
@@ -2009,6 +2011,7 @@ class NetOrbitCard extends HTMLElement {
     this._fitPop(pop, wrap);
     this._popOpen = true;
     pop.querySelectorAll(".x").forEach((b) => b.addEventListener("click", () => this._closePop(wrap)));
+    this._popAway(pop, wrap);
     return pop;
   }
 
@@ -2026,10 +2029,55 @@ class NetOrbitCard extends HTMLElement {
     pop.style.top = Math.max(4, top) + "px";
   }
 
-  _closePop(wrap) {
+  // The map doesn't update while a popup is open, so a popup must not stay open by accident (a wall panel).
+  // It closes on a tap outside it (a tap on another node opens that node's popup instead), on Escape, and after
+  // NO_POP_IDLE_MS without a touch. A form with changes not yet saved ignores outside taps and the idle timer:
+  // only Close, Escape or its own buttons end it. A popup that is no longer on the page (the card redrew under
+  // it) closes on any tap and on the timer, so the map never stays frozen behind it.
+  _popAway(pop, wrap) {
+    if (this._popOff) this._popOff();
+    let dirty = false;
+    let timer = null;
+    const keep = () => pop.isConnected && dirty;
+    const idle = () => { clearTimeout(timer); timer = setTimeout(() => { if (!keep()) this._closePop(wrap); }, NO_POP_IDLE_MS); };
+    // On the click, not the pointerdown: closing redraws the card, and a redraw between pointerdown and click
+    // would replace the button under the finger and lose the tap (Share, Edit, the zoom buttons). The redraw
+    // also waits until that click has been handled; see _closePop.
+    const outside = (ev) => {
+      const path = ev.composedPath ? ev.composedPath() : [];
+      if (pop.isConnected && path.includes(pop)) return;
+      if (keep() || path.some((el) => el && el.classList && el.classList.contains("node"))) return;
+      this._closePop(wrap, true);
+    };
+    const esc = (ev) => { if (ev.key === "Escape") this._closePop(wrap); };
+    const touched = () => idle();
+    const changed = () => { dirty = true; idle(); };
+    const off = () => {
+      clearTimeout(timer);
+      document.removeEventListener("click", outside, true);
+      document.removeEventListener("keydown", esc, true);
+      if (this._popOff === off) this._popOff = null;
+    };
+    document.addEventListener("click", outside, true);
+    document.addEventListener("keydown", esc, true);
+    pop.addEventListener("pointerdown", touched);
+    pop.addEventListener("keydown", touched);
+    pop.addEventListener("input", changed);
+    pop.addEventListener("change", changed);
+    this._popOff = off;
+    idle();
+  }
+
+  // `later`: redraw after the current event has been handled, and not at all if it opened another popup.
+  _closePop(wrap, later = false) {
+    if (this._popOff) this._popOff();
     const old = wrap.querySelector(".pop");
     if (old) old.remove();
-    if (this._popOpen) { this._popOpen = false; this._sig = ""; this.hass = this._hass; }
+    if (!this._popOpen) return;
+    this._popOpen = false;
+    this._sig = "";
+    if (later) setTimeout(() => { if (!this._popOpen) this.hass = this._hass; }, 0);
+    else this.hass = this._hass;
   }
 
   _hubOptions(hubs, current) {

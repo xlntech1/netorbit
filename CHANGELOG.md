@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A popup left open no longer freezes the map.** The map doesn't redraw while a popup is open, so one left open (on a wall panel, say) stopped all updates until someone closed it. A popup now closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
+
 ## 0.3.0
 
 ### Added

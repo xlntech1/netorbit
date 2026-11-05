@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 // Minimal browser stand-ins so the card file can load under Node.
 globalThis.HTMLElement = class {};
-globalThis.customElements = { get: () => undefined, define: () => {} };
+globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
 const { netorbitLayout, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
@@ -355,6 +355,77 @@ function pumpRun(late, opts) {
   clk.run(late);
   return { painted, pushed, finished, clk };
 }
+
+test("a node popup closes on a tap outside, on Escape and when left alone; unsaved changes keep it open", () => {
+  const saved = { document: globalThis.document, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const on = {};
+  const timers = [];
+  globalThis.document = { addEventListener: (t, f) => (on[t] = f), removeEventListener: (t, f) => { if (on[t] === f) delete on[t]; } };
+  globalThis.setTimeout = (f, ms) => timers.push({ f, ms });
+  globalThis.clearTimeout = (id) => { if (id) timers[id - 1].f = null; };
+  try {
+    const make = () => {
+      const l = {};
+      return { isConnected: true, addEventListener: (t, f) => (l[t] = f), remove() { this.isConnected = false; }, fire: (t) => l[t]({}) };
+    };
+    const el = (cls) => ({ classList: { contains: (c) => c === cls } });
+    const tap = (path) => on.click({ composedPath: () => path });
+    const card = new globalThis.NetOrbitCard();
+    let redraws = 0;
+    Object.defineProperty(card, "hass", { get: () => undefined, set: () => redraws++ });
+    let pop = make();
+    const wrap = { querySelector: () => (pop.isConnected ? pop : null) };
+    const open = () => { pop = make(); card._popOpen = true; card._popAway(pop, wrap); };
+    const run = () => timers.splice(0).forEach((x) => x.f && x.f());
+
+    open();
+    tap([el("node")]);
+    assert.ok(pop.isConnected, "a tap on another node is left to that node, which swaps the popup");
+    tap([el("row"), pop]);
+    assert.ok(pop.isConnected, "a tap inside keeps it");
+    tap([el("sharebtn")]);
+    assert.ok(!pop.isConnected, "a tap outside closes it");
+    assert.ok(!on.click && !on.keydown && !card._popOff, "and lets go of the page");
+    assert.strictEqual(redraws, 0, "the redraw waits until the tap has been handled, so the button under it still works");
+    run();
+    assert.strictEqual(redraws, 1);
+
+    open();
+    tap([el("sharebtn")]);
+    card._popOpen = true; // that tap opened the share popup
+    run();
+    assert.strictEqual(redraws, 1, "no redraw under a popup the same tap opened");
+    card._popOpen = false;
+
+    open();
+    on.keydown({ key: "Escape" });
+    assert.ok(!pop.isConnected, "Escape closes it");
+    assert.strictEqual(redraws, 2);
+
+    open();
+    const t = timers.find((x) => x.f && x.ms === 120000);
+    t.f();
+    assert.ok(!pop.isConnected, "left alone for two minutes, it closes");
+    run();
+
+    open();
+    pop.fire("input");
+    tap([el("map")]);
+    timers.forEach((x) => x.f && x.f());
+    assert.ok(pop.isConnected, "a form with unsaved changes stays open");
+    on.keydown({ key: "Escape" });
+    assert.ok(!pop.isConnected, "until Escape (or Close, or its own buttons)");
+    run();
+
+    open();
+    pop.fire("input");
+    pop.isConnected = false; // the card redrew under it
+    tap([el("map")]);
+    assert.ok(!card._popOpen && !card._popOff, "a popup no longer on the page never keeps the map frozen");
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
 
 test("the video pump holds the first frame, then advances exactly 1/30 s per frame", () => {
   const { painted, pushed, finished } = pumpRun();
