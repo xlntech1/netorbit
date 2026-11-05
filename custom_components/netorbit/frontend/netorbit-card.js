@@ -2029,13 +2029,16 @@ class NetOrbitCard extends HTMLElement {
     return (n.raw && (n.raw.mac || n.raw.ip)) || n.mac || n.ip || n.label;
   }
 
-  _call(service, data) {
+  // onError takes the message instead of a toast, for a form that shows it itself.
+  _call(service, data, onError = null) {
     const entryId = this._summaryEntry();
     if (entryId) data.config_entry_id = entryId;
     this._sig = "";
     return this._hass.callService("netorbit", service, data).then(() => true, (e) => {
       console.error("NetOrbit:", e);
-      this._notify(`NetOrbit: ${(e && e.message) || e}`);
+      const msg = (e && e.message) || String(e);
+      if (onError) onError(msg);
+      else this._notify(`NetOrbit: ${msg}`);
       return false;
     });
   }
@@ -2205,13 +2208,16 @@ class NetOrbitCard extends HTMLElement {
     if (n.mac) data.mac = n.mac;
     else if (n.ip) data.ip = n.ip;
     else { this._notify("This device has no MAC or IP address to name it by."); return Promise.resolve(false); }
-    return this._call("track_device", data).then((ok) => {
-      if (!ok || !n.entity || !n.reg_name) return ok;
-      return this._hass.callWS({ type: "config/entity_registry/update", entity_id: n.entity, name: name || null }).then(() => true, (e) => {
-        console.error("NetOrbit:", e);
-        this._notify(`NetOrbit saved the name, but the name set in Home Assistant's entity settings was not changed: ${(e && e.message) || e}`);
-        return false;
-      });
+    return this._call("track_device", data).then((ok) => ok && this._renameEntity(n, name));
+  }
+
+  // A name set in Home Assistant's entity settings wins on the map, so renaming a device changes it too.
+  _renameEntity(n, name) {
+    if (!n.entity || !n.reg_name) return Promise.resolve(true);
+    return this._hass.callWS({ type: "config/entity_registry/update", entity_id: n.entity, name: name || null }).then(() => true, (e) => {
+      console.error("NetOrbit:", e);
+      this._notify(`NetOrbit saved the name, but the name set in Home Assistant's entity settings was not changed: ${(e && e.message) || e}`);
+      return false;
     });
   }
 
@@ -2407,7 +2413,8 @@ class NetOrbitCard extends HTMLElement {
       // Catch up on updates held while the form was open; the redraw opens the details again from them.
       if (this._hass) this.hass = this._hass;
     });
-    q(".save").addEventListener("click", () => {
+    const save = q(".save");
+    save.addEventListener("click", () => {
       let fields;
       try { fields = noParseFields(q(".fx").value); } catch (e) { q(".err").textContent = e.message; return; }
       // The box shows every field, so what is missing now has been removed.
@@ -2417,12 +2424,22 @@ class NetOrbitCard extends HTMLElement {
       if (n.kind === "hub") {
         data.hub = n.key.replace(/^hub:/, "");
         if (name && name !== n.label) data.name = name;
-      } else data.device = this._ref(n);
-      this._closePop(wrap);
-      const saved = this._call(n.kind === "hub" ? "update_hub" : "update_device", data);
-      // A device is renamed the same way as from its menu in Edit layout: an empty name goes back to the automatic
-      // one, and a name set in Home Assistant's entity settings (it wins on the map) changes too.
-      if (n.kind === "device" && renamed) saved.then((ok) => ok && this._rename(n, name));
+      } else {
+        data.device = this._ref(n);
+        // An empty name goes back to the automatic one, as from the device's menu in Edit layout.
+        if (renamed) data.name = name;
+      }
+      // One save for everything. The form stays open until it is accepted, so a refused value (too long, too many
+      // fields) keeps what was typed and says why.
+      save.disabled = true;
+      q(".err").textContent = "";
+      this._call(n.kind === "hub" ? "update_hub" : "update_device", data, (msg) => { q(".err").textContent = msg; }).then((ok) => {
+        save.disabled = false;
+        if (!ok) return;
+        if (pop.isConnected) this._closePop(wrap);
+        // A name set in Home Assistant's entity settings wins on the map, so it changes too.
+        if (n.kind === "device" && renamed) this._renameEntity(n, name);
+      });
     });
   }
 

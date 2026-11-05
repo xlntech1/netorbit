@@ -489,6 +489,48 @@ test("the details popup lets the map update and opens again from the new data; f
   assert.ok(!card._popOpen && !card._liveDetails, "a device gone from the map closes its popup");
 });
 
+test("Edit in the details popup saves once and keeps the form open when the save is refused", async () => {
+  const PC = "00:00:5e:00:53:10";
+  const card = new globalThis.NetOrbitCard();
+  const calls = [];
+  let refuse = "Field 'Notes' is longer than 500 characters";
+  card._hass = {
+    states: {}, entities: {},
+    callService: (d, s, data) => { calls.push([s, { ...data }]); return refuse ? Promise.reject(new Error(refuse)) : Promise.resolve(); },
+    callWS: (msg) => { calls.push(["ws", msg]); return Promise.resolve(); },
+  };
+  card._entities = () => [];
+  const toasts = [];
+  card._notify = (m) => toasts.push(m);
+  let closed = 0;
+  card._closePop = () => { closed++; };
+  const el = () => { const l = {}; return { value: "", textContent: "", disabled: false, addEventListener: (t, f) => (l[t] = f), click: () => l.click() }; };
+  const parts = { ".name": el(), ".mb": el(), ".fx": el(), ".err": el(), ".save": el(), ".back": el() };
+  const pop = { isConnected: true, classList: { add() {} }, querySelector: (q) => parts[q] };
+  card._openPop = () => pop;
+  const n = { key: PC, kind: "device", label: "PC", mac: PC.toUpperCase(), entity: "sensor.pc", reg_name: "PC", fields: { Old: "x" } };
+  card._detailsEdit(n, {}, {}, () => {}, {}, {}, () => "");
+
+  parts[".name"].value = "Desk PC";
+  parts[".fx"].value = "Notes: long";
+  parts[".save"].click();
+  assert.ok(parts[".save"].disabled, "no second save while one is on its way");
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepStrictEqual(calls.map((c) => c[0]), ["update_device"], "one call carries the name with the text");
+  assert.deepStrictEqual(calls[0][1], { managed_by: "", fields: { Old: null, Notes: "long" }, device: PC.toUpperCase(), name: "Desk PC" });
+  assert.strictEqual(closed, 0, "a refused save keeps the form open");
+  assert.strictEqual(parts[".err"].textContent, refuse, "with the reason in it");
+  assert.strictEqual(parts[".fx"].value, "Notes: long", "and what was typed");
+  assert.ok(!parts[".save"].disabled && toasts.length === 0);
+
+  refuse = null;
+  parts[".save"].click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepStrictEqual(calls.map((c) => c[0]), ["update_device", "update_device", "ws"]);
+  assert.strictEqual(closed, 1, "an accepted save closes the form");
+  assert.deepStrictEqual(calls[2][1], { type: "config/entity_registry/update", entity_id: "sensor.pc", name: "Desk PC" }, "and renames the entity too");
+});
+
 test("the video pump holds the first frame, then advances exactly 1/30 s per frame", () => {
   const { painted, pushed, finished } = pumpRun();
   assert.strictEqual(painted.length, 120);
