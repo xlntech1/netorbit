@@ -614,6 +614,8 @@ async def test_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
     dev = _node_states(hass)["Device 53:0B"]
     assert dev.attributes["managed_by"] == "https://192.0.2.1/"
     assert dev.attributes["fields"] == {"Location": "Hall", "Owner": "Sam"}
+    # Long free text stays out of the history database.
+    assert {"managed_by", "fields", "fqdn"} <= dev.state_info["unrecorded_attributes"]
 
     # An empty value removes a field, an empty managed_by removes it.
     await hass.services.async_call(

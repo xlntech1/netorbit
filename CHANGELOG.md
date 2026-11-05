@@ -4,7 +4,7 @@
 
 ### Added
 - **Tap a hub or device for its details.** Outside Edit layout, a tap opens a NetOrbit popup with the DNS name, IP, MAC, maker, the hub it connects through and how it was placed, when it was first and last seen, and any text you attached to it. *More info* still opens Home Assistant's own dialog. Admins get *Edit* there to change the name, *Managed by* and the extra fields.
-- **Managed by and extra fields.** Every hub and device can carry a *Managed by* line (a link, or the name of another hub or device on the map, which the popup then jumps to) and up to 20 extra fields (`Label: value`). Set them from the details popup, the integration's *Edit* forms, the new `netorbit.update_device` service, `netorbit.update_hub`, or an AI assistant. Exports include them, and an import checks them the same way (anything that fails is left out and counted).
+- **Managed by and extra fields.** Every hub and device can carry a *Managed by* line (a link, or the name of another hub or device on the map, which the popup then jumps to) and up to 20 extra fields (`Label: value`). Set them from the details popup, the integration's *Edit* forms, the new `netorbit.update_device` service, `netorbit.update_hub`, or an AI assistant. Exports include them, and an import checks them the same way (anything that fails is left out and counted). They and the DNS name (`fqdn`) stay out of Home Assistant's history.
 - **Prefer DNS and Bonjour names** (Settings, off by default). The name your network gives a device comes first, before names from other integrations, and replaces names NetOrbit made up for hubs, such as *Router*. Names you typed are kept. Every sensor now also carries the full DNS name as `fqdn`.
 
 ### Fixed

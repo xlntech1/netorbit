@@ -243,7 +243,7 @@ Hover a device for a summary. Tap a hub or device for its details: DNS name, add
 
 ## Entities, events and services
 
-- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname`, `fqdn` (the full DNS name), `sleepy`, `managed_by` and `fields`.
+- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname`, `fqdn` (the full DNS name), `sleepy`, `managed_by` and `fields`. `managed_by`, `fields` and `fqdn` are left out of the history database.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
