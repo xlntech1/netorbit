@@ -11,6 +11,7 @@ from .test_dhcp_helpers import advance
 from .test_integration import _entry, _node_states, _setup
 
 AP = "00:00:5f:00:53:04"  # example-ok: synthetic test value
+AP2 = "00:00:5e:00:53:05"
 TV = "00:00:5e:00:53:10"
 NEW = "00:00:5e:00:53:30"
 
@@ -108,6 +109,47 @@ async def test_device_added_by_ip_switches_to_its_mac(hass: HomeAssistant, fake_
     assert len(cams) == 1
     cam = cams[0]
     assert cam.attributes["ip"] == "192.0.2.41" and cam.attributes["sleepy"] is True and cam.state == "online"
+
+
+def _hub(entry, hub_id: str) -> dict:
+    return next(h for h in entry.options["hubs"] if h["id"] == hub_id)
+
+
+async def test_hub_host_edit_is_not_undone_by_the_old_mac(hass: HomeAssistant, fake_net, freezer) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.6", "192.0.2.7"}
+    fake_net.arp = {"192.0.2.6": AP, "192.0.2.7": AP2}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await hass.services.async_call(DOMAIN, "confirm_hub", {"device": "192.0.2.6", "name": "Hall AP"}, blocking=True)
+    assert _hub(entry, "hall_ap")["mac"] == AP
+
+    # The access point is replaced: point the hub at the new box while the old one is still on the network.
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "edit_hub"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"hub": "hall_ap"})
+    flow = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"name": "Hall AP", "host": "192.0.2.7", "type": "access_point", "parent": "gateway"}
+    )
+    await hass.async_block_till_done()
+    await advance(hass, freezer, 301)
+    hub = _hub(entry, "hall_ap")
+    assert hub["host"] == "192.0.2.7" and hub["mac"] == AP2
+    assert _node_states(hass)["Hall AP"].attributes["mac"] == AP2.upper()
+
+
+async def test_removed_hub_leaves_nothing_behind_for_its_namesake(hass: HomeAssistant, fake_net, freezer) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.6", "192.0.2.7"}
+    fake_net.arp = {"192.0.2.6": AP, "192.0.2.7": AP2}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await hass.services.async_call(DOMAIN, "confirm_hub", {"device": "192.0.2.6", "name": "Hall AP"}, blocking=True)
+    # One sweep with the hub in place records its MAC on the hub's own record.
+    await advance(hass, freezer, 301)
+    await hass.services.async_call(DOMAIN, "remove_hub", {"hub": "Hall AP"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "add_hub", {"name": "Hall AP", "ip": "192.0.2.7"}, blocking=True)
+    await advance(hass, freezer, 301)
+    hub = _hub(entry, "hall_ap")
+    assert hub["host"] == "192.0.2.7" and hub["mac"] == AP2
 
 
 async def test_export_and_import(hass: HomeAssistant, fake_net) -> None:

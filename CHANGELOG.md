@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Editing a hub's address is no longer undone on the next sweep while the old box is still on the network, and a hub added under a removed hub's name no longer inherits its MAC.
+
 ## 0.3.0
 
 ### Added

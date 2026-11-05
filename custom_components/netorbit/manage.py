@@ -106,7 +106,11 @@ def update_hub(opts: dict[str, Any], hub_id: str, **fields: Any) -> dict[str, An
     if "type" in fields and fields["type"] in HUB_TYPES:
         hub["type"] = fields["type"]
     if "host" in fields:
-        hub["host"] = fields["host"] or None
+        host = fields["host"] or None
+        if host != hub.get("host"):
+            # A new address means a different box: the MAC is learned again from it.
+            hub["mac"] = None
+        hub["host"] = host
     if "parent" in fields and hub_id != ROOT_HUB_ID:
         parent = fields["parent"] or ROOT_HUB_ID
         if parent not in hub_ids(opts):

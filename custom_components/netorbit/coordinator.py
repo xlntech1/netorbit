@@ -247,11 +247,30 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def apply_options(self, entry: ConfigEntry) -> None:
         """Use new options without reloading the entry."""
         old_comm = self.opts.get(CONF_SNMP_COMMUNITY)
+        old_hubs = {h["id"]: h for h in self.opts[CONF_HUBS]}
         self.opts = options_with_defaults(entry)
         self.update_interval = timedelta(seconds=self.opts[CONF_PING_INTERVAL])
         if self.opts.get(CONF_SNMP_COMMUNITY) != old_comm:
             self._force_probe = True
             self._force_sweep = True
+        self._forget_hub_identities(old_hubs)
+
+    def _forget_hub_identities(self, old_hubs: dict[str, dict[str, Any]]) -> None:
+        """Drop what was learned about hubs that were removed or pointed at another address by hand.
+
+        A hub's record otherwise keeps its MAC: a host edit was undone on the next sweep while the
+        old box was still on the network, and a hub added later under the same name inherited the
+        old MAC. NetOrbit's own changes (DHCP moves, automatic hubs) go through _commit, which
+        updates self.opts before saving, so they never get here.
+        """
+        for hub in self.opts[CONF_HUBS]:
+            old = old_hubs.pop(hub["id"], None)
+            rec = self._seen.get(f"hub:{hub['id']}")
+            if old and rec and old.get("host") != hub.get("host"):
+                for f in ("mac", "ip", "snmp", "snmp_misses"):
+                    rec.pop(f, None)
+        for hub_id in old_hubs:
+            self._seen.pop(f"hub:{hub_id}", None)
 
     def request_sweep(self, probe: bool = False) -> None:
         """Run a discovery sweep (and optionally an SNMP probe) on the next update."""
