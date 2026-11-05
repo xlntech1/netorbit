@@ -228,7 +228,7 @@
   "services": {
     "track_device": {
       "name": "Track device",
-      "description": "Start tracking a device by MAC or IP address.",
+      "description": "Start tracking a device by MAC or IP address, including one NetOrbit hasn't seen yet. For a device already on the map, Update device also sets Managed by and extra fields.",
       "fields": {
         "mac": {
           "name": "MAC address",
@@ -498,7 +498,7 @@
     },
     "update_device": {
       "name": "Update device",
-      "description": "Rename a device, change its icon, hub or sleep setting, or its Managed by and extra fields.",
+      "description": "Change a device already on the map, found by name, IP or MAC: its name, icon, hub, sleep setting, Managed by and extra fields. To add a device NetOrbit hasn't seen, use Track device.",
       "fields": {
         "device": {
           "name": "Device",

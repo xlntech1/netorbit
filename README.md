@@ -274,6 +274,8 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
 | `netorbit.scan_now` | none |
 
+**`track_device` or `update_device`?** Both set a device's name, icon, hub and "allowed to sleep", and an empty `name` goes back to the automatic one. Use `track_device` to start tracking something by MAC or IP, including an address NetOrbit hasn't seen yet. Use `update_device` for a device already on the map: it finds it by name, IP or MAC, also sets *Managed by* and the extra fields, and `icon: ""` clears the icon.
+
 ### Blueprints
 
 - [Notify when a device goes offline](blueprints/automation/netorbit/device_offline_notify.yaml)
