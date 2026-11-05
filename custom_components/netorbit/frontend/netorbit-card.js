@@ -27,6 +27,43 @@ const NO_ORBIT_PATH = "M8.11,1.75C9.3,1.25 10.62,1 12,1C18.08,1 23,5.92 23,12C23
 // Possible hubs get a color of their own, so they never look like "seen recently".
 const NO_SUGGEST = { color: "#f472b6", light: "#f9a8d4", soft: "rgba(244,114,182,.5)" };
 
+// A device "+N more" never folds away: one not seen or only seen recently, a new device, or a possible hub
+// (the bubble's tooltip promises that devices with problems are always shown).
+function noFoldKeeps(d) {
+  return !!d.suggested || d.status === "stale" || d.status === "recent" || d.status === "new";
+}
+
+// Fold the devices of a very large map: past `max` devices each hub keeps a share, and the rest of its devices
+// become one "+N more" bubble. Devices noFoldKeeps picks always stay, even past the share. Exported for tests.
+function noFold(devices, max) {
+  if (devices.length <= max) return devices.slice();
+  const rank = { stale: 0, recent: 1, new: 2, unknown: 3, online: 4 };
+  const byHub = {};
+  devices.forEach((d) => (byHub[d.link] = (byHub[d.link] || []).concat(d)));
+  const share = Math.max(3, Math.floor(max / Object.keys(byHub).length));
+  const kept = [];
+  Object.entries(byHub).forEach(([hub, list]) => {
+    // Possible hubs first (they need a tap), then problems, then the rest.
+    list.sort((a, b) => (!!b.suggested - !!a.suggested) || ((rank[a.status] ?? 3) - (rank[b.status] ?? 3)) || String(a.label).localeCompare(String(b.label)));
+    if (list.length <= share) { kept.push(...list); return; }
+    const must = list.filter(noFoldKeeps);
+    const others = list.filter((d) => !noFoldKeeps(d));
+    const room = Math.max(0, share - 1 - must.length);
+    let shown = others.slice(0, room);
+    let rest = others.slice(room);
+    // A bubble for a single device hides nothing worth hiding.
+    if (rest.length < 2) { shown = others; rest = []; }
+    kept.push(...must, ...shown);
+    if (rest.length) {
+      kept.push({
+        key: "more:" + hub, kind: "more", link: hub, label: `+${rest.length} more`, status: "online",
+        icon: "mdi:dots-horizontal-circle-outline", members: rest,
+      });
+    }
+  });
+  return kept;
+}
+
 const NO_HUB_TYPE = {
   router: "Router",
   switch: "Switch",
@@ -1056,27 +1093,9 @@ class NetOrbitCard extends HTMLElement {
       }
     }
     // Very large networks: keep problem devices visible, fold the rest into "+N more" per hub.
-    const max = Number(cfg.max_devices) || 80;
-    if (devices.length > max) {
-      const rank = { stale: 0, recent: 1, new: 2, unknown: 3, online: 4 };
-      const byHub = {};
-      devices.forEach((d) => (byHub[d.link] = (byHub[d.link] || []).concat(d)));
-      const share = Math.max(3, Math.floor(max / Object.keys(byHub).length));
-      const kept = [];
-      Object.entries(byHub).forEach(([hub, list]) => {
-        // Possible hubs first (they need a tap), then problems, then the rest.
-        list.sort((a, b) => (!!b.suggested - !!a.suggested) || (rank[a.status] - rank[b.status]) || String(a.label).localeCompare(String(b.label)));
-        if (list.length <= share) { kept.push(...list); return; }
-        const shown = list.slice(0, share - 1);
-        const rest = list.slice(share - 1);
-        kept.push(...shown, {
-          key: "more:" + hub, kind: "more", link: hub, label: `+${rest.length} more`, status: "online",
-          icon: "mdi:dots-horizontal-circle-outline", members: rest,
-        });
-      });
-      devices.length = 0;
-      devices.push(...kept);
-    }
+    const folded = noFold(devices, Number(cfg.max_devices) || 80);
+    devices.length = 0;
+    devices.push(...folded);
     return { hubs, devices, root, summary, internet, suggestions, sig: sig.join("|") };
   }
 
@@ -2226,5 +2245,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac };
+if (typeof module !== "undefined") module.exports = { noFold, noFoldKeeps, netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

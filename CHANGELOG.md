@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **"+N more" no longer hides devices with problems.** On a map past `max_devices`, a hub with more devices needing attention than its share folded some of them into the bubble, although its tooltip says devices with problems are always shown. Devices not seen or only seen recently, new devices and possible hubs now always stay on the map, and a bubble that would hold a single device is not drawn.
+
 ## 0.3.0
 
 ### Added

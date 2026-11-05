@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: () => {} };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noFold, noFoldKeeps } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -281,6 +281,27 @@ test("the reveal pops nodes in the order the beam passes them", () => {
   assert.strictEqual(netorbitRevealGlobal(4).labels, 1);
   assert.strictEqual(netorbitRevealGlobal(0.5).header, false);
   assert.strictEqual(netorbitRevealGlobal(4).header, true);
+});
+
+test("+N more never folds away problems, new devices or possible hubs", () => {
+  const devs = [];
+  for (let i = 0; i < 40; i++) devs.push({ key: "on" + i, kind: "device", link: "sw", status: "online", label: "On " + String(i).padStart(2, "0") });
+  devs.push({ key: "st", kind: "device", link: "sw", status: "stale", label: "Gone" });
+  devs.push({ key: "rc", kind: "device", link: "sw", status: "recent", label: "Flaky" });
+  devs.push({ key: "sg", kind: "new", link: "sw", status: "new", label: "Maybe a hub", suggested: { key: "x" } });
+  for (let i = 0; i < 6; i++) devs.push({ key: "nw" + i, kind: "new", link: "__new", status: "new", label: "New " + i });
+  const out = noFold(devs, 8); // two hubs: a share of 4 each
+  const keys = out.map((d) => d.key);
+  ["st", "rc", "sg", "nw0", "nw5"].forEach((k) => assert.ok(keys.includes(k), k));
+  const more = out.find((d) => d.kind === "more");
+  assert.strictEqual(more.link, "sw");
+  assert.strictEqual(more.members.length, 40);
+  assert.ok(more.members.every((m) => !noFoldKeeps(m)), "only healthy devices fold");
+  assert.strictEqual(out.filter((d) => d.kind === "more").length, 1, "new devices never fold");
+  // Under the limit nothing folds; a bubble that would hold one device is not drawn.
+  assert.strictEqual(noFold(devs, 100).length, devs.length);
+  const few = [{ key: "a", link: "h", status: "online", label: "a" }].concat(["b", "c", "d", "e"].map((k) => ({ key: k, link: "h", status: "stale", label: k })));
+  assert.deepStrictEqual(noFold(few, 4).map((d) => d.key).sort(), ["a", "b", "c", "d", "e"]);
 });
 
 test("links draw in from their start", () => {
