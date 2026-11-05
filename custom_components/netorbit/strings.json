@@ -43,7 +43,9 @@
           "add_device": "Track a device",
           "edit_device": "Edit, move or stop tracking a device",
           "review_new": "Review new devices",
-          "settings": "Settings"
+          "settings": "Settings",
+          "add_controller": "Add a Wi-Fi controller",
+          "edit_controller": "Edit or remove a Wi-Fi controller"
         }
       },
       "settings": {
@@ -176,6 +178,49 @@
           "hub": "Hub these devices connect through",
           "text": "Pasted list"
         }
+      },
+      "add_controller": {
+        "title": "Add a Wi-Fi controller",
+        "description": "A Wi-Fi controller tells NetOrbit which access point each wireless device uses, and NetOrbit places those devices under their access points. NetOrbit only reads from it.",
+        "data": {
+          "kind": "Type"
+        },
+        "data_description": {
+          "kind": "The product that manages your access points. Each type is a small plug-in module."
+        }
+      },
+      "edit_controller": {
+        "title": "Edit a Wi-Fi controller",
+        "data": {
+          "controller": "Controller"
+        },
+        "data_description": {
+          "controller": "The controller to change or remove."
+        }
+      },
+      "controller_details": {
+        "title": "{kind}",
+        "description": "{note}",
+        "data": {
+          "name": "Name",
+          "host": "Host or IP address",
+          "port": "Port",
+          "verify_ssl": "Check the certificate",
+          "token": "API token",
+          "username": "Username",
+          "password": "Password",
+          "remove": "Remove this controller"
+        },
+        "data_description": {
+          "name": "How the controller is shown on the map (the device's source line says \"from <name>\"). Empty uses the host.",
+          "host": "Address of the controller's management interface.",
+          "port": "Its HTTPS API port (443 unless you changed it).",
+          "verify_ssl": "Off for a controller with its factory certificate; turn on once it has a certificate your Home Assistant trusts.",
+          "token": "A read-only API token. On an edit, leave empty to keep the saved one.",
+          "username": "A read-only account.",
+          "password": "Its password. On an edit, leave empty to keep the saved one.",
+          "remove": "Tick to delete this controller and its credentials from the settings."
+        }
       }
     },
     "error": {
@@ -186,7 +231,10 @@
       "no_addresses": "No MAC or IP addresses were found in that text.",
       "no_matches": "None of those addresses match a device on this network.",
       "not_loaded": "NetOrbit is not running right now. Try again in a minute.",
-      "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields."
+      "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields.",
+      "cannot_connect": "Could not reach the controller at that address and port, or it answered with an error.",
+      "invalid_auth": "The controller refused the token or password.",
+      "unknown_kind": "This controller was saved by a build with a plug-in that is not installed here. It can only be removed."
     },
     "abort": {
       "no_devices": "No devices are being tracked yet.",
@@ -208,6 +256,11 @@
         "access_point": "Access point",
         "mesh_node": "Mesh node",
         "other": "Other"
+      }
+    },
+    "controller_kind": {
+      "options": {
+        "fortigate": "FortiGate (FortiAP wireless controller)"
       }
     }
   },

@@ -33,6 +33,7 @@ Install it, click Submit, and NetOrbit draws the best map your network can tell 
 - **Works out where each device connects, when your network will say:**
   - **Managed switches with SNMP:** NetOrbit reads their MAC address tables and works out which switch port, and so which access point, every device is behind. No port mapping needed.
   - **Grandstream GWN access points with SNMP:** NetOrbit reads each access point's own Wi-Fi client list, so every wireless client shows under the access point it is connected to.
+  - **A Wi-Fi controller NetOrbit can read itself:** add it under **Configure > Add a Wi-Fi controller** and NetOrbit asks it which access point each wireless client is on. FortiGate (with FortiAPs) is the first; more are one plug-in module each. See [docs/SETUP.md](docs/SETUP.md#a-wi-fi-controller-netorbit-reads-itself).
   - **UniFi**, and other integrations that report which access point each client uses (Netgear/Orbi's per-device "connected AP" sensors, for example).
 - **Lets you place the rest, three ways:**
   1. **Drag and drop on the card.** Tap *Edit layout*, drag a device onto its hub, or tap it for *Move to*, *Make it a hub* and *Automatic*. To move a hub (a switch from the router to an access point, say), tap the hub in Edit layout and pick *Connected to*.
@@ -102,6 +103,7 @@ Tip for two devices that look the same, such as two from the same maker: power o
 | UniFi with the UniFi integration | Automatically | Automatically (wireless clients) |
 | Managed switches with SNMP on | Automatically | Automatically (wired and wireless, through the switch port) |
 | Netgear/Orbi with the Netgear integration | Suggested | Automatically, once you enable its "connected AP" sensors |
+| A Wi-Fi controller NetOrbit reads itself (FortiGate with FortiAPs so far) | Suggested | Automatically (wireless clients), once you add it under Configure |
 | eero, Google/Nest Wifi, Deco, Velop, ISP routers | Suggested | By you: drag and drop, paste a list, or an AI assistant |
 
 How to turn each of these on, step by step: [docs/SETUP.md](docs/SETUP.md).
@@ -177,6 +179,7 @@ Under the integration's **Configure** menu:
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
 | Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, stop tracking. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
+| Add / edit a Wi-Fi controller | The system that manages your access points, asked (read-only) which access point each wireless device uses. The connection is tested before it is saved. |
 | Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off and SNMP community. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".

@@ -23,6 +23,20 @@ If Home Assistant already has an integration for your router or Wi-Fi system, Ne
 - **Netgear / Orbi:** the Netgear integration creates a "connected AP" sensor per device, turned off by default. Turn them on (Settings > Devices & services > Netgear > entities, show disabled, enable the ones you want) and NetOrbit uses them.
 - **Fritz!Box, ASUS, OpenWrt, MikroTik, Keenetic and other router integrations:** these give NetOrbit device names, even when they don't say which access point a device is on.
 
+### A Wi-Fi controller NetOrbit reads itself
+
+If your Wi-Fi system has an API but no Home Assistant integration that says which access point each client uses, NetOrbit can ask the controller directly. Add it under **Configure > Add a Wi-Fi controller**: NetOrbit asks it every ping round which client is on which access point and places those clients under their access points (the placement shows as *controller*). It only reads.
+
+**FortiGate (FortiAP wireless controller)**
+
+1. On the FortiGate, create an admin profile that allows only *Monitor > WiFi* (read), then a REST API administrator with that profile and Home Assistant's IP as its trusted host. Copy the API key.
+2. In NetOrbit, pick *FortiGate*, enter the address, the port (443, or the HTTPS admin port you use), whether to check the certificate (off for the factory self-signed one), and the key. NetOrbit tests the connection before saving.
+3. Access points are matched to hubs by MAC (from the controller's access point list) or by name, so give your hubs the names the controller uses for its access points.
+
+The key is kept in NetOrbit's options like the SNMP community: in Home Assistant's storage, readable by admins, never in diagnostics or exports. A controller that stops answering is logged once, keeps its last answer, and is asked again after five minutes.
+
+**Adding another type.** Wi-Fi sources are plug-in modules in `custom_components/netorbit/wireless/`. A controller is a `Controller` subclass (the form fields it needs, `fetch` returning a `WirelessInfo` per client); an access point that lists its own clients over SNMP is an `AccessPointReader` subclass (`matches` the SNMP identity, `read` the clients), like the Grandstream GWN one. Register it in `wireless/__init__.py`; the coordinator needs no change.
+
 ## 2. Turn on SNMP on managed switches
 
 SNMP lets a switch share its address table, the list of which device sits behind which port. With that, NetOrbit works out the whole wired picture by itself, including which access point every wireless device is on (because the access point sits on a switch port too).

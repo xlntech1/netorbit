@@ -7,7 +7,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import NetOrbitConfigEntry
-from .const import CONF_DEVICES, CONF_DISMISSED_HUBS, CONF_HUBS, CONF_IGNORED, CONF_SNMP_COMMUNITY
+from .const import CONF_DEVICES, CONF_DISMISSED_HUBS, CONF_HUBS, CONF_IGNORED, CONF_SNMP_COMMUNITY, CONF_WIFI_CONTROLLERS
+from .wireless import has_credentials
 
 
 def _mask(i: int, prefix: str) -> str:
@@ -43,7 +44,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
             )
     return {
         "settings": {
-            **{k: v for k, v in opts.items() if k not in (CONF_HUBS, CONF_DEVICES, CONF_IGNORED, CONF_DISMISSED_HUBS, CONF_SNMP_COMMUNITY)},
+            **{k: v for k, v in opts.items() if k not in (CONF_HUBS, CONF_DEVICES, CONF_IGNORED, CONF_DISMISSED_HUBS, CONF_SNMP_COMMUNITY, CONF_WIFI_CONTROLLERS)},
+            # Controller kinds only: never the address or the token.
+            "wifi_controllers": [{"kind": c.get("kind"), "has_credentials": has_credentials(c)} for c in opts.get(CONF_WIFI_CONTROLLERS) or []],
             "snmp_community_set": bool(opts.get(CONF_SNMP_COMMUNITY)),
             "dismissed_hubs": len(opts.get(CONF_DISMISSED_HUBS, [])),
         },

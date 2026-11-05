@@ -24,6 +24,7 @@ CONF_AUTO_HUBS: Final = "auto_hubs"
 CONF_DISMISSED_HUBS: Final = "dismissed_hubs"
 CONF_SNMP_ENABLED: Final = "snmp_enabled"
 CONF_SNMP_COMMUNITY: Final = "snmp_community"
+CONF_WIFI_CONTROLLERS: Final = "wifi_controllers"  # Wi-Fi controllers NetOrbit asks for their clients (see wireless/)
 CONF_GROUP_BY_TYPE: Final = "group_by_type"
 CONF_CHECK_INTERNET: Final = "check_internet"
 CONF_PREFER_DNS: Final = "prefer_dns_names"

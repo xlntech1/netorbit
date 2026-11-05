@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import secrets
 from typing import Any
 
 import voluptuous as vol
@@ -10,6 +11,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import selector as sel
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_AUTO_HUBS,
@@ -28,6 +30,7 @@ from .const import (
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
     CONF_SUBNET,
+    CONF_WIFI_CONTROLLERS,
     DEFAULT_DISCOVERY_INTERVAL,
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
@@ -44,6 +47,7 @@ from .const import (
 from . import manage
 from .coordinator import options_with_defaults
 from .logic import extract_addresses, normalize_mac, validate_subnet
+from .wireless import REGISTRY
 
 # Shown in the "setup finished" dialog (translations can't contain URLs, so it's a placeholder).
 GUIDE_URL = "https://github.com/the-scott-davis/netorbit#add-the-map-to-a-dashboard"
@@ -199,6 +203,9 @@ class NetOrbitOptionsFlow(OptionsFlow):
         if self._untracked_choices():
             menu.append("review_new")
         menu.append("settings")
+        menu.append("add_controller")
+        if self.opts.get(CONF_WIFI_CONTROLLERS):
+            menu.append("edit_controller")
         return self.async_show_menu(step_id="init", menu_options=menu)
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -238,6 +245,75 @@ class NetOrbitOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="settings", data_schema=schema)
+
+    # ----- Wi-Fi controllers -------------------------------------------------------
+
+    async def async_step_add_controller(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            self._ctrl_kind, self._ctrl_id = user_input["kind"], None
+            return await self.async_step_controller_details()
+        kinds = sorted(REGISTRY)
+        return self.async_show_form(
+            step_id="add_controller", data_schema=vol.Schema({vol.Required("kind", default=kinds[0]): _select(kinds, "controller_kind")})
+        )
+
+    async def async_step_edit_controller(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        ctrls = self.opts.get(CONF_WIFI_CONTROLLERS) or []
+        if user_input is not None:
+            self._ctrl_id = user_input["controller"]
+            self._ctrl_kind = next((c["kind"] for c in ctrls if c.get("id") == self._ctrl_id), sorted(REGISTRY)[0])
+            return await self.async_step_controller_details()
+        choices = [
+            {"value": c["id"], "label": f"{c.get('name') or c.get('host')} ({REGISTRY[c['kind']].label if c.get('kind') in REGISTRY else c.get('kind')})"}
+            for c in ctrls if c.get("id")
+        ]
+        return self.async_show_form(step_id="edit_controller", data_schema=vol.Schema({vol.Required("controller"): _select(choices)}))
+
+    async def async_step_controller_details(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        cls = REGISTRY.get(self._ctrl_kind)
+        ctrls = self.opts.setdefault(CONF_WIFI_CONTROLLERS, [])
+        current = next((c for c in ctrls if c.get("id") == self._ctrl_id), None) if self._ctrl_id else None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if user_input.get("remove") and current:
+                self.opts[CONF_WIFI_CONTROLLERS] = [c for c in ctrls if c is not current]
+                return self._save()
+        if cls is None:
+            # A controller saved by a build with another plug-in (or edited storage): it can only be removed.
+            if current is None:
+                return await self.async_step_init()
+            return self.async_show_form(
+                step_id="controller_details", data_schema=vol.Schema({vol.Optional("remove", default=False): bool}),
+                errors={"base": "unknown_kind"}, description_placeholders={"kind": str(self._ctrl_kind), "note": ""},
+            )
+        if user_input is not None:
+            cfg = {**(current or {}), "kind": self._ctrl_kind, "id": (current or {}).get("id") or f"{self._ctrl_kind}_{secrets.token_hex(3)}"}
+            for key in ("name", "host", "username", "token", "password"):
+                value = (user_input.get(key) or "").strip() if isinstance(user_input.get(key), str) else user_input.get(key)
+                if value:
+                    cfg[key] = value  # an empty secret box on an edit keeps the saved one
+            cfg["port"] = int(user_input.get("port") or cls.default_port)
+            cfg["verify_ssl"] = bool(user_input.get("verify_ssl", cls.default_verify_ssl))
+            if not cfg.get("name"):
+                cfg["name"] = cfg.get("host") or cls.label
+            error = await cls(cfg).test(async_get_clientsession(self.hass))
+            if error:
+                errors["base"] = error
+            else:
+                if current:
+                    ctrls[ctrls.index(current)] = cfg
+                else:
+                    ctrls.append(cfg)
+                return self._save()
+        schema = vol.Schema({vol.Required("name", default=(current or {}).get("name", "")): str, **cls.fields(current)})
+        if current:
+            schema = schema.extend({vol.Optional("remove", default=False): bool})
+        if user_input is not None:
+            schema = self.add_suggested_values_to_schema(schema, {k: v for k, v in user_input.items() if k not in ("token", "password")})
+        return self.async_show_form(
+            step_id="controller_details", data_schema=schema, errors=errors,
+            description_placeholders={"kind": cls.label, "note": cls.note},
+        )
 
     # ----- hubs ------------------------------------------------------------------
 

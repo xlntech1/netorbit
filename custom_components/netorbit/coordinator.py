@@ -15,6 +15,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -38,6 +39,7 @@ from .const import (
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
     CONF_SUBNET,
+    CONF_WIFI_CONTROLLERS,
     DEFAULT_AUTO_HUBS,
     DEFAULT_DISCOVERY_INTERVAL,
     DEFAULT_IGNORE_RANDOM_MAC,
@@ -87,9 +89,10 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
-from .snmp import SnmpClient, is_grandstream
+from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
+from .wireless import AccessPointReader, ControllerError, WirelessInfo, controller_for, reader_for
 from .topology import Topology, infer, macs_close
 
 _LOGGER = logging.getLogger(__name__)
@@ -162,6 +165,7 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_AUTO_HUBS, DEFAULT_AUTO_HUBS)
     opts.setdefault(CONF_SNMP_ENABLED, DEFAULT_SNMP_ENABLED)
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
+    opts.setdefault(CONF_WIFI_CONTROLLERS, [])
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -212,6 +216,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._topology = Topology()
         self._controller_ap: dict[str, str] = {}
         self._ap_clients: dict[str, str] = {}  # client MAC -> hub id, from the AP's own SNMP client table
+        self._controller_hub: dict[str, str] = {}  # client mac -> hub id, from controllers that only name the AP
+        self._ctrl_clients: dict[str, WirelessInfo] = {}  # client mac -> what the Wi-Fi controllers say
+        self._ctrl_last: dict[str, dict[str, WirelessInfo]] = {}  # per controller, its last good answer
+        self._ctrl_backoff: dict[str, datetime] = {}  # controllers that failed: do not ask again before this
         self._suggestions: list[dict[str, Any]] = []
         self._community_asked: set[str] = set()  # IPs already asked with the custom SNMP community
         self._registry: dict[str, Any] = {}
@@ -254,11 +262,14 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def apply_options(self, entry: ConfigEntry) -> None:
         """Use new options without reloading the entry."""
         old_comm = self.opts.get(CONF_SNMP_COMMUNITY)
+        old_ctrl = self.opts.get(CONF_WIFI_CONTROLLERS)
         self.opts = options_with_defaults(entry)
         self.update_interval = timedelta(seconds=self.opts[CONF_PING_INTERVAL])
         if self.opts.get(CONF_SNMP_COMMUNITY) != old_comm:
             self._force_probe = True
             self._force_sweep = True
+        if self.opts.get(CONF_WIFI_CONTROLLERS) != old_ctrl:
+            self._ctrl_backoff.clear()  # a changed controller is asked again at once
 
     def request_sweep(self, probe: bool = False) -> None:
         """Run a discovery sweep (and optionally an SNMP probe) on the next update."""
@@ -346,7 +357,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             rec["last_seen"] = now.isoformat()
             if ip:
                 rec["ip"] = ip
+        await self._poll_controllers(now)
         self._controller_ap = client_access_points(self.hass)
+        for mac, info in self._ctrl_clients.items():
+            if info.ap_mac:
+                self._controller_ap.setdefault(mac, info.ap_mac)
         self._save()
         self._alive_keys = {k for k, _ in alive}
         data = self._build(now, self._alive_keys)
@@ -701,21 +716,23 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         return tables
 
     async def _read_ap_clients(self) -> dict[str, str]:
-        """Read the Wi-Fi client list from every Grandstream access point hub: {client mac: hub id}."""
-        asked: list[tuple[str, str, str]] = []
+        """Read the Wi-Fi client list from every access point hub a plug-in knows: {client mac: hub id}."""
+        asked: list[tuple[str, AccessPointReader, str, str]] = []
         for hub in self.opts[CONF_HUBS]:
             host = hub.get("host")
             info = self._snmp_info(hub)
-            if not host or not info or info.get("bridge") or not is_grandstream(info.get("object_id"), info.get("descr")):
+            reader = reader_for(info) if host else None
+            if reader is None:
                 continue
             comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
-            asked.append((hub["id"], host, comm))
+            asked.append((hub["id"], reader, host, comm))
         # Ask all the access points at once so a slow one does not hold up the others.
-        results = await asyncio.gather(*(self._snmp.wireless_clients(host, comm) for _id, host, comm in asked), return_exceptions=True)
+        results = await asyncio.gather(*(reader.read(self._snmp, host, comm) for _id, reader, host, comm in asked), return_exceptions=True)
         out: dict[str, str] = {}
-        for (hub_id, _host, _comm), clients in zip(asked, results):
-            for mac in (clients if isinstance(clients, set) else ()):
-                out.setdefault(mac, hub_id)
+        for (hub_id, _reader, _host, _comm), clients in zip(asked, results):
+            for info in (clients if isinstance(clients, list) else ()):
+                if info.mac:
+                    out.setdefault(info.mac, hub_id)
         return out
 
     def _wired_elsewhere(self, mac: str, ap_hub: str) -> bool:
@@ -732,6 +749,49 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if dev_port and ap_port and dev_port != ap_port:
                 return True
         return False
+
+    async def _poll_controllers(self, now: datetime) -> None:
+        """Ask every Wi-Fi controller for its clients. A failing one logs once, keeps its last answer and
+        is left alone for five minutes."""
+        cfgs = self.opts.get(CONF_WIFI_CONTROLLERS) or []
+        if not cfgs:
+            self._ctrl_clients, self._controller_hub = {}, {}
+            return
+        session = async_get_clientsession(self.hass)
+        clients: dict[str, WirelessInfo] = {}
+        for cfg in cfgs:
+            ctrl = controller_for(cfg)
+            if ctrl is None:
+                continue
+            until = self._ctrl_backoff.get(ctrl.id)
+            if until is None or now >= until:
+                try:
+                    found = await ctrl.fetch(session)
+                except ControllerError as err:
+                    if ctrl.id not in self._ctrl_backoff:
+                        _LOGGER.warning("NetOrbit: Wi-Fi controller %s (%s) did not answer: %s", ctrl.name, ctrl.kind, err)
+                    self._ctrl_backoff[ctrl.id] = now + timedelta(minutes=5)
+                else:
+                    if ctrl.id in self._ctrl_backoff:
+                        _LOGGER.info("NetOrbit: Wi-Fi controller %s answers again", ctrl.name)
+                        self._ctrl_backoff.pop(ctrl.id, None)
+                    self._ctrl_last[ctrl.id] = {w.mac: w for w in found if w.mac}
+            for mac, info in self._ctrl_last.get(ctrl.id, {}).items():
+                clients.setdefault(mac, info)
+        self._ctrl_clients = clients
+        # Clients whose AP the controller only names: find that hub by name once per round.
+        hubs: dict[str, str] = {}
+        by_name: dict[str, str | None] = {}
+        for mac, info in clients.items():
+            if info.ap_mac and self._hub_for_mac(info.ap_mac):
+                continue
+            if not info.ap_name:
+                continue
+            if info.ap_name not in by_name:
+                by_name[info.ap_name] = self.resolve_hub(info.ap_name)
+            if by_name[info.ap_name]:
+                hubs[mac] = by_name[info.ap_name]  # type: ignore[assignment]
+        self._controller_hub = hubs
 
     def _snmp_info(self, hub: dict[str, Any]) -> dict[str, Any] | None:
         info = (self._seen.get(f"hub:{hub['id']}") or {}).get("snmp")
@@ -782,7 +842,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 continue
             candidates[rec["mac"]] = rec
         # APs that a controller integration reports clients against are hubs by definition.
-        controller_aps = set(client_access_points(self.hass).values())
+        controller_aps = set(client_access_points(self.hass).values()) | {w.ap_mac for w in self._ctrl_clients.values() if w.ap_mac}
 
         for mac, rec in candidates.items():
             if mac in dismissed or mac in ignored or self._is_hub_address(mac, rec.get("ip")):
@@ -886,7 +946,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def _auto_placement(self, key: str, rec: dict[str, Any], now: datetime) -> tuple[str | None, str]:
         mac = rec.get("mac")
         ap = self._controller_ap.get(mac) if mac else None
-        hub = self._hub_for_mac(ap)
+        hub = self._hub_for_mac(ap) or (self._controller_hub.get(mac) if mac else None)
         if hub:
             rec["auto"] = {"hub": hub, "source": PLACE_CONTROLLER, "at": now.isoformat()}
             return hub, PLACE_CONTROLLER
@@ -1045,7 +1105,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
-        if self._controller_ap:
+        if self._controller_ap or self._controller_hub:
             sources.add(PLACE_CONTROLLER)
 
         devices = self.opts[CONF_DEVICES]
