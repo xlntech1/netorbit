@@ -76,7 +76,7 @@ Settings > Devices & services > NetOrbit > **Configure > Settings**, and enter t
 
 NetOrbit asks devices once an hour whether they speak SNMP, and reads switch tables every few minutes. It's a tiny amount of traffic.
 
-With SNMP on, NetOrbit also reads each switch port's traffic counters once a round and draws the links thicker the busier they are: a device alone on a port gets the port's rate, a hub on a port gets the rate of everything behind it.
+With SNMP on, NetOrbit also reads each switch port's traffic counters once a round and draws the links thicker the busier they are: a device alone on a port gets the port's rate, a hub on a port gets the rate of everything behind it. **Read port counters for traffic** in Settings turns that off.
 
 **Who gets your community.** SNMP v2c sends the community unencrypted, so NetOrbit only sends yours to hubs, suggested hubs, and gear from makers that only build network equipment (UniFi, eero, Aruba, MikroTik and so on). Everything else is only asked with the factory "public". If your switch is from a maker that also sells plugs and cameras (TP-Link, Netgear) and NetOrbit doesn't spot it, add it as a hub under **Configure > Add a hub** with its IP, and NetOrbit will start reading it.
 
