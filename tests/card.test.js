@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noPorts, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -630,4 +630,13 @@ test("traffic: units, the line, link widths and the coarse signature", () => {
   assert.notStrictEqual(noTrafficSig(t), noTrafficSig(Object.assign({}, t, { in_bps: 124_000_000 })));
   assert.notStrictEqual(noTrafficSig(t), noTrafficSig(Object.assign({}, t, { utilization: 15 })));
   assert.strictEqual(noTrafficSig(null), "");
+});
+
+test("port chips: open ports first, closed ones after, names optional", () => {
+  const chips = noPorts(["443/https", "22/ssh", "8123/home-assistant", "9999"], ["80/http", "22/ssh"]);
+  assert.deepStrictEqual(chips.map((p) => [p.port, p.name, p.closed]), [
+    [22, "ssh", false], [443, "https", false], [8123, "home-assistant", false], [9999, "", false], [80, "http", true],
+  ]);
+  assert.deepStrictEqual(noPorts(undefined, undefined), []);
+  assert.deepStrictEqual(noPorts(["junk"], []), []);
 });

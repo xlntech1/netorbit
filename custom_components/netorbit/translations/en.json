@@ -64,7 +64,11 @@
           "prefer_dns_names": "Prefer DNS and Bonjour names",
           "weak_signal_minutes": "Weak signal after",
           "offline_after_rounds": "Offline after",
-          "port_counters": "Read port counters for traffic"
+          "port_counters": "Read port counters for traffic",
+          "port_scan_interval": "Port scan every",
+          "port_scan_ports": "Ports to scan",
+          "port_scan_custom": "Custom ports",
+          "port_scan_hubs": "Scan hubs too"
         },
         "data_description": {
           "discovery_interval": "How often the whole subnet is swept for new devices.",
@@ -78,7 +82,11 @@
           "prefer_dns_names": "Show the name your network gives a device (reverse DNS, or the name it announces over Bonjour) before names from other integrations, and use it for hubs NetOrbit named itself, such as the router. Names you typed are always kept.",
           "weak_signal_minutes": "A device whose radio signal has read below good (−80 dBm, LQI 80) for this many minutes is drawn in a yellow-green between online and seen-recently, and the popup says for how long; the clock only stops once the signal reads clearly good again (−75 dBm, LQI 100), so a device hovering at the threshold counts. 0 never colours it.",
           "offline_after_rounds": "How many ping rounds in a row a flagged hub or device may miss before it counts as offline and fires netorbit_device_offline. 3 rounds at a 60 s ping interval means one dropped Wi-Fi packet never pages you.",
-          "port_counters": "Each ping round, read every managed switch's port byte counters (three short SNMP walks per switch) and draw busier links wider. Turn off to keep the MAC tables but skip the counters."
+          "port_counters": "Each ping round, read every managed switch's port byte counters (three short SNMP walks per switch) and draw busier links wider. Turn off to keep the MAC tables but skip the counters.",
+          "port_scan_interval": "Hours between checks of which TCP ports each online device accepts connections on. 0 turns port discovery off. Devices are scanned one at a time with a plain connect and nothing is sent, but an intrusion detection system on your network may still log it: allow Home Assistant's address there first.",
+          "port_scan_ports": "Common is about 70 well-known ports (ssh, http, smb, rdp, mqtt and so on). Extended adds about 270 more admin, database, media and IoT ports and takes longer. Custom scans only the ports listed below.",
+          "port_scan_custom": "Only used with Custom: ports and ranges separated by commas, such as 22, 80, 443, 8000-8100. At most 1024 ports.",
+          "port_scan_hubs": "Also scan the router, switches and access points."
         }
       },
       "add_hub": {
@@ -256,7 +264,8 @@
       "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields.",
       "cannot_connect": "Could not reach the controller at that address and port, or it answered with an error.",
       "invalid_auth": "The controller refused the token or password.",
-      "unknown_kind": "This controller was saved by a build with a plug-in that is not installed here. It can only be removed."
+      "unknown_kind": "This controller was saved by a build with a plug-in that is not installed here. It can only be removed.",
+      "bad_ports": "Write ports and ranges separated by commas, such as 22, 80, 443, 8000-8100 (at most 1024 ports)."
     },
     "abort": {
       "no_devices": "No devices are being tracked yet.",
@@ -283,6 +292,13 @@
     "controller_kind": {
       "options": {
         "fortigate": "FortiGate (FortiAP wireless controller)"
+      }
+    },
+    "port_scan_ports": {
+      "options": {
+        "common": "Common (about 70 ports)",
+        "extended": "Extended (about 340 ports)",
+        "custom": "Custom list"
       }
     }
   },
@@ -622,6 +638,20 @@
         "notify": {
           "name": "Offline alerts",
           "description": "Fire netorbit_device_offline and netorbit_device_online for this one."
+        }
+      }
+    },
+    "scan_ports": {
+      "name": "Scan ports",
+      "description": "Check which TCP ports hubs or devices accept connections on, right away.",
+      "fields": {
+        "device": {
+          "name": "Hub or device",
+          "description": "Names, IPs or MAC addresses. Leave empty to scan everything that is online, in the background."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
         }
       }
     }

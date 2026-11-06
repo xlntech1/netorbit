@@ -36,6 +36,10 @@ from .const import (
     CONF_OFFLINE_AFTER,
     CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
+    CONF_PORT_SCAN_CUSTOM,
+    CONF_PORT_SCAN_HUBS,
+    CONF_PORT_SCAN_INTERVAL,
+    CONF_PORT_SCAN_PORTS,
     CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
@@ -50,6 +54,9 @@ from .const import (
     DEFAULT_OFFLINE_AFTER,
     DEFAULT_PORT_COUNTERS,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_PORT_SCAN_HUBS,
+    DEFAULT_PORT_SCAN_INTERVAL,
+    DEFAULT_PORT_SCAN_PORTS,
     DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
     DEFAULT_STALE_HOURS,
@@ -76,6 +83,7 @@ from .const import (
     PLACE_MANUAL,
     PLACE_NONE,
     PLACE_SNMP,
+    PORTS_CLOSED_KEEP_DAYS,
     ROOT_HUB_ID,
     SNMP_DEFAULT_COMMUNITY,
     SNMP_PROBE_INTERVAL_S,
@@ -97,6 +105,7 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
+from .ports import ports_for, scan as scan_ports, service_name
 from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
@@ -118,6 +127,8 @@ DNS_REFRESH = timedelta(hours=12)
 NAME_LOOKUP_VERSION = 3
 AUTO_PLACEMENT_TTL = timedelta(days=7)
 SNMP_CONCURRENCY = 32
+PORT_SCAN_TIMEOUT = 1.0
+PORT_SCAN_CONCURRENCY = 16  # connections in flight per host; hosts are scanned one at a time
 
 # Sweep phases shown on the summary sensor while a scan runs, with a rough percentage for each.
 # "starting" is the moment between setup finishing and the background sweep taking over.
@@ -153,6 +164,9 @@ class Node:
     entities: dict[str, str] | None = None  # entities a person linked by role: signal, lqi, ssid, ...
     notify: bool = False  # fire offline/online events for this node
     throughput: dict[str, Any] | None = None  # in_bps/out_bps (the device's view), speed_mbps, utilization, source, at (see traffic.py)
+    ports: list[dict[str, Any]] = field(default_factory=list)  # open TCP ports: {port, name, first, last}
+    ports_closed: list[dict[str, Any]] = field(default_factory=list)  # open at an earlier scan, closed now: {port, name, at}
+    ports_checked: str | None = None  # when the ports were last scanned
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -184,6 +198,10 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_WEAK_AFTER, DEFAULT_WEAK_AFTER)
     opts.setdefault(CONF_OFFLINE_AFTER, DEFAULT_OFFLINE_AFTER)
     opts.setdefault(CONF_PORT_COUNTERS, DEFAULT_PORT_COUNTERS)
+    opts.setdefault(CONF_PORT_SCAN_INTERVAL, DEFAULT_PORT_SCAN_INTERVAL)
+    opts.setdefault(CONF_PORT_SCAN_PORTS, DEFAULT_PORT_SCAN_PORTS)
+    opts.setdefault(CONF_PORT_SCAN_CUSTOM, "")
+    opts.setdefault(CONF_PORT_SCAN_HUBS, DEFAULT_PORT_SCAN_HUBS)
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -230,6 +248,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._force_sweep = False
         self._force_probe = False
         self._force_names = False
+        self._last_port_scan: datetime | None = None
+        self._force_port_scan = False
+        self._port_scan_lock = asyncio.Lock()
         self._privileged: bool | None = None
         self._sweep_lock = asyncio.Lock()
         self._snmp = SnmpClient(hass)
@@ -270,6 +291,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         # The hub tree from the last sweep, so the map looks the same after a restart while the
         # first sweep is still running.
         self._topology = Topology(hub_parent=dict(data.get("hub_parent") or {}))
+        # The port scan schedule survives a restart: the newest scan on record counts as the last round.
+        stamps = [rec.get("ports_checked") for rec in self._seen.values() if rec.get("ports_checked")]
+        if stamps:
+            self._last_port_scan = datetime.fromisoformat(max(stamps))
         self._privileged = await self._detect_privileges()
 
     async def _detect_privileges(self) -> bool | None:
@@ -291,6 +316,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         """Use new options without reloading the entry."""
         old_comm = self.opts.get(CONF_SNMP_COMMUNITY)
         old_ctrl = self.opts.get(CONF_WIFI_CONTROLLERS)
+        old_ports = (self.opts.get(CONF_PORT_SCAN_PORTS), self.opts.get(CONF_PORT_SCAN_CUSTOM))
         self.opts = options_with_defaults(entry)
         self.update_interval = timedelta(seconds=self.opts[CONF_PING_INTERVAL])
         if self.opts.get(CONF_SNMP_COMMUNITY) != old_comm:
@@ -298,6 +324,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             self._force_sweep = True
         if self.opts.get(CONF_WIFI_CONTROLLERS) != old_ctrl:
             self._ctrl_backoff.clear()  # a changed controller is asked again at once
+        if self.opts[CONF_PORT_SCAN_INTERVAL] and (self.opts[CONF_PORT_SCAN_PORTS], self.opts[CONF_PORT_SCAN_CUSTOM]) != old_ports:
+            self._force_port_scan = True
 
     def request_sweep(self, probe: bool = False, names: bool = False) -> None:
         """Run a discovery sweep on the next update; with `probe` an SNMP probe too, with `names` a
@@ -399,6 +427,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._tracker_wireless = tracker_wireless_by_mac(self.hass)
         self._save()
         self._alive_keys = {k for k, _ in alive}
+        self._maybe_scan_ports(now)
         data = self._build(now, self._alive_keys)
         self._fire_transitions(data)
         return data
@@ -1191,6 +1220,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 wireless=self._mark_weak(key, self._wireless_for(hub.get("mac") or rec.get("mac"), hub), now), entities=hub.get("entities"),
                 notify=bool(hub.get("notify")),
                 throughput=self._throughput_for(key, hub.get("mac") or rec.get("mac"), hub["id"], now),
+                **self._port_fields(rec if rec.get("ports_checked") else own),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1222,6 +1252,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 wireless=self._mark_weak(key, self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), now), entities=cfg.get("entities"),
                 notify=bool(cfg.get("notify")),
                 throughput=self._throughput_for(key, rec.get("mac") or cfg.get("mac"), None, now),
+                **self._port_fields(rec),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,
@@ -1394,6 +1425,108 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         wireless["weak_since"] = since.isoformat()
         wireless["weak"] = bool(minutes) and now - since >= timedelta(minutes=minutes)
         return wireless
+
+    # ----- ports ---------------------------------------------------------------
+
+    @callback
+    def _maybe_scan_ports(self, now: datetime) -> None:
+        """Start the scheduled port scan in the background when it is due. Never two rounds at once."""
+        hours = self.opts[CONF_PORT_SCAN_INTERVAL]
+        # The first ping round after setup only knows what was saved; a scheduled round waits for the sweep.
+        if self._last_sweep is None and not self._force_port_scan:
+            return
+        if (not hours and not self._force_port_scan) or self._port_scan_lock.locked():
+            return
+        due = self._force_port_scan or self._last_port_scan is None or now - self._last_port_scan >= timedelta(hours=hours)
+        if not due:
+            return
+        self._force_port_scan = False
+        self._last_port_scan = now
+        self.config_entry.async_create_background_task(self.hass, self.scan_ports(), f"{DOMAIN} port scan")
+
+    def request_port_scan(self) -> int:
+        """Scan every online node in the background as soon as possible. Returns how many that is."""
+        self._force_port_scan = True
+        self._maybe_scan_ports(dt_util.utcnow())
+        return len(self._port_targets(None))
+
+    def _port_targets(self, keys: list[str] | None) -> list[tuple[str, str]]:
+        """(key, ip) to scan: the given nodes, or every hub and device that answered the last ping round."""
+        ips: dict[str, str | None] = {}
+        if keys is not None or self.opts[CONF_PORT_SCAN_HUBS]:
+            for hub in self.opts[CONF_HUBS]:
+                if hub.get("host"):
+                    ips[f"hub:{hub['id']}"] = hub["host"]
+        ips.update(self._tracked_targets())
+        if keys is None:
+            keys = [k for k in ips if k in self._alive_keys]
+        return [(k, ips[k]) for k in keys if ips.get(k)]
+
+    async def scan_ports(self, keys: list[str] | None = None) -> dict[str, list[int]]:
+        """Connect to the configured TCP ports on each node, one host at a time, and record what answered.
+
+        Returns {key: [open ports]}. A second round waits for the first to finish.
+        """
+        ports = ports_for(self.opts[CONF_PORT_SCAN_PORTS], self.opts.get(CONF_PORT_SCAN_CUSTOM))
+        targets = self._port_targets(keys)
+        if not ports or not targets:
+            return {}
+        result: dict[str, list[int]] = {}
+        async with self._port_scan_lock:
+            for key, ip in targets:
+                try:
+                    open_ports = await scan_ports(ip, ports, PORT_SCAN_TIMEOUT, PORT_SCAN_CONCURRENCY)
+                except OSError as err:
+                    _LOGGER.debug("Port scan of %s failed: %s", ip, err)
+                    continue
+                now = dt_util.utcnow()
+                rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
+                opened, closed = self._note_ports(rec, open_ports, ports, now)
+                if opened or closed:
+                    _LOGGER.debug("Ports on %s: opened %s, closed %s", ip, sorted(opened), sorted(closed))
+                result[key] = sorted(open_ports)
+            self._save()
+        if result:
+            self.async_rebuild()
+        return result
+
+    @staticmethod
+    def _note_ports(rec: dict[str, Any], open_ports: set[int], scanned: list[int], now: datetime) -> tuple[set[int], set[int]]:
+        """Record one scan of one node. Returns (newly open, newly closed) for whoever wants to tell someone.
+
+        A port that was open once but is outside the set being scanned now keeps its last result.
+        """
+        stamp = now.isoformat()
+        known: dict[str, dict[str, Any]] = rec.get("ports") or {}
+        closed: dict[str, str] = rec.get("ports_closed") or {}
+        opened = {p for p in open_ports if str(p) not in known}
+        gone = {int(p) for p in known if int(p) in scanned and int(p) not in open_ports}
+        for p in open_ports:
+            entry = known.setdefault(str(p), {"first": stamp})
+            entry["last"] = stamp
+            entry["name"] = service_name(p)
+            closed.pop(str(p), None)
+        for p in gone:
+            known.pop(str(p), None)
+            closed[str(p)] = stamp
+        keep_after = (now - timedelta(days=PORTS_CLOSED_KEEP_DAYS)).isoformat()
+        rec["ports"] = known
+        rec["ports_closed"] = {p: at for p, at in closed.items() if at >= keep_after}
+        rec["ports_checked"] = stamp
+        return opened, gone
+
+    @staticmethod
+    def _port_fields(rec: dict[str, Any]) -> dict[str, Any]:
+        """The port part of a Node, from a seen record."""
+        known = rec.get("ports") or {}
+        closed = rec.get("ports_closed") or {}
+        return {
+            "ports": [{"port": int(p), "name": v.get("name"), "first": v.get("first"), "last": v.get("last")}
+                      for p, v in sorted(known.items(), key=lambda kv: int(kv[0]))],
+            "ports_closed": [{"port": int(p), "name": service_name(int(p)), "at": at}
+                             for p, at in sorted(closed.items(), key=lambda kv: int(kv[0]))],
+            "ports_checked": rec.get("ports_checked"),
+        }
 
     # ----- lookups used by services, the options flow and AI tools ------------
 

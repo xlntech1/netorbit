@@ -31,6 +31,10 @@ CONF_PREFER_DNS: Final = "prefer_dns_names"
 CONF_WEAK_AFTER: Final = "weak_signal_minutes"
 CONF_OFFLINE_AFTER: Final = "offline_after_rounds"
 CONF_PORT_COUNTERS: Final = "port_counters"
+CONF_PORT_SCAN_INTERVAL: Final = "port_scan_interval"
+CONF_PORT_SCAN_PORTS: Final = "port_scan_ports"
+CONF_PORT_SCAN_CUSTOM: Final = "port_scan_custom"
+CONF_PORT_SCAN_HUBS: Final = "port_scan_hubs"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -50,6 +54,15 @@ DEFAULT_WEAK_AFTER: Final = 10
 DEFAULT_OFFLINE_AFTER: Final = 3
 # Read every switch's port counters each round for traffic on the links (three short SNMP walks per switch).
 DEFAULT_PORT_COUNTERS: Final = True
+# Port discovery: hours between TCP port scans of every online node, 0 = off.
+DEFAULT_PORT_SCAN_INTERVAL: Final = 0
+PORT_SET_COMMON: Final = "common"
+PORT_SET_EXTENDED: Final = "extended"
+PORT_SET_CUSTOM: Final = "custom"
+PORT_SET_CHOICES: Final = [PORT_SET_COMMON, PORT_SET_EXTENDED, PORT_SET_CUSTOM]
+DEFAULT_PORT_SCAN_PORTS: Final = PORT_SET_COMMON
+DEFAULT_PORT_SCAN_HUBS: Final = True
+PORTS_CLOSED_KEEP_DAYS: Final = 30  # how long a port that closed again stays listed
 SNMP_DEFAULT_COMMUNITY: Final = "public"
 
 # Free text people attach to a hub or device ("Managed by", extra fields)
@@ -119,6 +132,7 @@ SERVICE_IMPORT_LIST: Final = "import_client_list"
 SERVICE_CONFIRM_HUB: Final = "confirm_hub"
 SERVICE_DISMISS_HUB: Final = "dismiss_hub"
 SERVICE_RESET: Final = "reset_placement"
+SERVICE_SCAN_PORTS: Final = "scan_ports"
 
 # Frontend
 CARD_URL: Final = f"/{DOMAIN}/netorbit-card.js"

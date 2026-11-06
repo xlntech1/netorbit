@@ -19,6 +19,11 @@ scan_now:
   fields:
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
+scan_ports:
+  fields:
+    device: {example: "NAS", selector: {text: {multiple: true}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
 assign_device:
   fields:
     device: {required: true, example: "Living Room TV", selector: {text: {multiple: true}}}

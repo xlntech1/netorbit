@@ -222,6 +222,14 @@ def _tools() -> list[llm.Tool]:
             lambda h, e, c, a: _scan(c),
             open_world=True,
         ),
+        _Tool(
+            "netorbit_scan_ports",
+            "Find out which TCP ports a hub or device accepts connections on (ssh, http, smb and so on). Give devices by "
+            "name, IP or MAC. With none, every device that is online is scanned in the background.",
+            vol.Schema({vol.Optional("devices"): [cv.string]}),
+            lambda h, e, c, a: actions.scan_ports(h, e, c, a.get("devices")),
+            open_world=True,
+        ),
     ]
 
 

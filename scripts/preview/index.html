@@ -59,6 +59,15 @@
         if (!st.attributes._auto) st.attributes._auto = st.attributes.label;
         st.attributes.label = String(data.name || "").trim() || st.attributes._auto;
       }
+    } else if (svc === "scan_ports") {
+      [].concat(data.device || []).forEach((ref) => {
+        const st = String(ref).startsWith("hub:") ? Object.values(states).find((x) => x.attributes.node_key === ref) : findDev(ref);
+        if (!st) return;
+        const a = st.attributes;
+        a.ports_checked = new Date().toISOString();
+        if (!a.ports_named || !a.ports_named.length) { a.ports_named = ["22/ssh", "443/https"]; a.ports_closed = []; }
+        else if (a.ports_named.length > 1) a.ports_closed = (a.ports_closed || []).concat(a.ports_named.pop());
+      });
     } else if (svc === "update_hub" || svc === "update_device") {
       const st = svc === "update_hub" ? Object.values(states).find((x) => x.attributes.node_key === "hub:" + data.hub) : findDev(data.device);
       if (!st) return;

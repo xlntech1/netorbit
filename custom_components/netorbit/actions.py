@@ -82,7 +82,7 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
             if node.kind == INTERNET_KEY:
                 continue
             extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn),
-                                       ("wireless", node.wireless), ("alerts", node.notify),
+                                       ("open_ports", [p["port"] for p in node.ports]), ("wireless", node.wireless), ("alerts", node.notify),
                                        ("throughput", node.throughput)) if v}
             if node.kind == "hub":
                 hubs.append({
@@ -270,6 +270,25 @@ async def update_device(
         opts[CONF_IGNORED].remove(key)
     await _save(hass, entry, coord, opts)
     return {"device": (name or "").strip() or _name(coord, key)}
+
+
+async def scan_ports(hass, entry, coord, devices: list[str] | None = None) -> dict[str, Any]:
+    """Scan the TCP ports of these hubs or devices now. With none given, everything online is scanned in the background."""
+    if not devices:
+        return {"scheduled": coord.request_port_scan()}
+    keys: list[str] = []
+    missing: list[str] = []
+    for ref in devices:
+        ref = str(ref)
+        hub = coord.resolve_hub(ref) if ref.startswith("hub:") else None
+        key = f"hub:{hub}" if hub else coord.resolve_device(ref)
+        if not key and (hub := coord.resolve_hub(ref)):
+            key = f"hub:{hub}"
+        (keys if key else missing).append(key or ref)
+    if missing:
+        raise ActionError(f"No hub or device matches {', '.join(missing)}")
+    result = await coord.scan_ports(keys)
+    return {"scanned": len(result), "open": {_name(coord, k): v for k, v in result.items()}}
 
 
 EXPORT_VERSION = 1

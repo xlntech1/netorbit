@@ -141,5 +141,11 @@
     Object.assign(byLabel("Thermostat 1F").attributes, { wireless: { radio: "thread", lqi: 196, signal_dbm: -64, quality: 77, source: "entity:sensor.thermostat_rssi", at: scanned }, linked_entities: { signal: "sensor.thermostat_rssi" } });
     // Alerts: the router pages when it goes offline.
     Object.assign(byLabel("Router").attributes, { notify: true });
+    // Ports from a scan two hours ago; the NAS closed its plain http since the scan before.
+    const scanned = new Date(Date.now() - 2 * 3600e3).toISOString();
+    Object.assign(byLabel("Router").attributes, { ports_named: ["53/dns", "80/http", "443/https"], ports_closed: [], ports_checked: scanned });
+    Object.assign(byLabel("NAS").attributes, { ports_named: ["22/ssh", "139/netbios", "445/smb", "5000/upnp", "5001/synology", "32400/plex"], ports_closed: ["80/http"], ports_checked: scanned });
+    Object.assign(byLabel("Printer").attributes, { ports_named: ["80/http", "515/lpd", "631/ipp", "9100/jetdirect"], ports_closed: [], ports_checked: scanned });
+    Object.assign(byLabel("Office Switch").attributes, { ports_named: [], ports_closed: [], ports_checked: scanned });
   })();
 })();

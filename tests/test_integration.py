@@ -910,3 +910,94 @@ async def test_offline_and_online_alerts(hass: HomeAssistant, fake_net, freezer:
     await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True)
     await hass.async_block_till_done()
     assert _node_states(hass)["Device 53:0B"].attributes["notify"] is True
+
+
+async def test_port_scan(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """Port discovery runs on its schedule, on demand, remembers ports that closed, and is settable in the options flow."""
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B, "192.0.2.12": MAC_C}
+    fake_net.ports = {GATEWAY: {53, 80, 443}, "192.0.2.11": {22, 8123, 65000}, "192.0.2.12": set()}
+    entry = _entry("auto", port_scan_interval=6)
+    await _setup(hass, entry)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    nodes = _node_states(hass)
+    dev = nodes["Device 53:0B"]
+    assert dev.attributes["ports"] == [22, 8123]  # 65000 is not in the common set
+    assert dev.attributes["ports_named"] == ["22/ssh", "8123/home-assistant"]
+    assert dev.attributes["ports_closed"] == [] and dev.attributes["ports_checked"]
+    assert nodes["Router"].attributes["ports"] == [53, 80, 443]  # hubs are scanned too by default
+    assert nodes["Device 53:0C"].attributes["ports"] == [] and nodes["Device 53:0C"].attributes["ports_checked"]
+    assert sorted(fake_net.port_scans) == sorted([GATEWAY, "192.0.2.11", "192.0.2.12"])
+    first_check = dev.attributes["ports_checked"]
+
+    # Not again before the interval has passed; then the whole round runs once more.
+    fake_net.ports["192.0.2.11"] = {22}
+    await _advance(hass, freezer, 3600)
+    assert _node_states(hass)["Device 53:0B"].attributes["ports"] == [22, 8123]
+    await _advance(hass, freezer, 6 * 3600)
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["ports"] == [22]
+    assert dev.attributes["ports_closed"] == ["8123/home-assistant"]
+    assert dev.attributes["ports_checked"] != first_check
+
+    # On demand for one device: the answer lists what is open, and a port back again leaves the closed list.
+    fake_net.ports["192.0.2.11"] = {22, 8123}
+    fake_net.port_scans.clear()
+    result = await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True, return_response=True)
+    assert result == {"scanned": 1, "open": {"Device 53:0B": [22, 8123]}}
+    assert fake_net.port_scans == ["192.0.2.11"]
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["ports_closed"] == []
+    # Hubs by id, name or key; unknown names are refused.
+    result = await hass.services.async_call(DOMAIN, "scan_ports", {"device": ["hub:gateway", "Router"]}, blocking=True, return_response=True)
+    assert result["scanned"] == 1 and result["open"] == {"Router": [53, 80, 443]}
+    with pytest.raises(Exception, match="nope"):
+        await hass.services.async_call(DOMAIN, "scan_ports", {"device": ["nope"]}, blocking=True)
+    # With no device, everything online is scanned in the background.
+    fake_net.port_scans.clear()
+    result = await hass.services.async_call(DOMAIN, "scan_ports", {}, blocking=True, return_response=True)
+    assert result == {"scheduled": 3}
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(fake_net.port_scans) == 3
+
+    # The map tool lists open ports; diagnostics only count them.
+    from custom_components.netorbit.actions import network_map  # noqa: PLC0415
+    from custom_components.netorbit.diagnostics import async_get_config_entry_diagnostics  # noqa: PLC0415
+
+    assert next(d for d in network_map(entry.runtime_data)["devices"] if d["mac"].lower() == MAC_B)["open_ports"] == [22, 8123]
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert sorted(n["port_count"] for n in diag["nodes"]) == [0, 0, 2, 3]  # the internet node has none
+
+    # Settings: a custom list must parse; hubs can be left out; the new set is scanned right away.
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "settings"})
+    base = {
+        "mode": "auto", "ping_interval": 60, "discovery_interval": 300, "stale_hours": 24, "ignore_random_mac": True,
+        "auto_hubs": True, "group_by_type": True, "check_internet": True, "prefer_dns_names": False, "snmp_enabled": False,
+        "port_scan_interval": 1, "port_scan_ports": "custom", "port_scan_custom": "22, 80-70", "port_scan_hubs": False,
+    }
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], base)
+    assert flow["type"] is FlowResultType.FORM and flow["errors"] == {"port_scan_custom": "bad_ports"}
+    fake_net.port_scans.clear()
+    fake_net.ports["192.0.2.11"] = {22, 8123, 65000}
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {**base, "port_scan_custom": "65000"})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["port_scan_custom"] == "65000" and entry.options["port_scan_hubs"] is False
+    await _advance(hass, freezer, 60)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert sorted(fake_net.port_scans) == ["192.0.2.11", "192.0.2.12"]  # the router sat this one out
+    # Ports outside the new set keep their last result instead of being called closed.
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["ports_named"] == ["22/ssh", "8123/home-assistant", "65000"] and dev.attributes["ports_closed"] == []
+
+
+async def test_port_scan_is_off_by_default(hass: HomeAssistant, fake_net) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    fake_net.ports = {"192.0.2.11": {22}}
+    await _setup(hass, _entry("auto"))
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert fake_net.port_scans == []
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["ports"] == [] and dev.attributes["ports_checked"] is None

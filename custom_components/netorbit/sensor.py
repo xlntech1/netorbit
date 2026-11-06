@@ -57,6 +57,11 @@ def _device_info(entry_id: str, title: str) -> DeviceInfo:
     )
 
 
+def _port_label(p: dict[str, Any]) -> str:
+    """22/ssh, or just the number when nobody knows the port."""
+    return f"{p['port']}/{p['name']}" if p.get("name") else str(p["port"])
+
+
 class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
     """Status of one hub or device: online, recent or stale."""
 
@@ -123,6 +128,10 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "linked_entities": node.entities,
             "notify": node.notify,
             "throughput": node.throughput,
+            "ports": [p["port"] for p in node.ports],
+            "ports_named": [_port_label(p) for p in node.ports],
+            "ports_closed": [_port_label(p) for p in node.ports_closed],
+            "ports_checked": node.ports_checked,
         }
 
     @callback

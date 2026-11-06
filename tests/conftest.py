@@ -44,6 +44,8 @@ class FakeNet:
         self.vendors: dict[str, str] = {}  # "AA:BB:CC" -> vendor name
         self.counters: dict[str, dict[int, tuple[int, int, int | None]]] = {}  # ip -> {ifIndex: (in, out, speed)}
         self.bridge: dict[str, dict[int, int]] = {}  # ip -> {bridge port: ifIndex}
+        self.ports: dict[str, set[int]] = {}  # ip -> TCP ports that accept a connection
+        self.port_scans: list[str] = []  # every IP NetOrbit port-scanned, in order
 
     async def snmp_probe(self, _client, ip, community):
         self.probed.append((ip, community))
@@ -76,6 +78,10 @@ class FakeNet:
     async def mdns_name(self, ip, timeout=1.0):
         return self.mdns.get(ip)
 
+    async def port_scan(self, ip, ports, timeout=1.0, concurrency=16):
+        self.port_scans.append(ip)
+        return {p for p in self.ports.get(ip, set()) if p in ports}
+
     async def multiping(self, addresses, **kwargs):
         return [FakeHost(a, a in self.alive) for a in addresses]
 
@@ -96,6 +102,7 @@ def fake_net():
         patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(net.arp)),
         patch("custom_components.netorbit.coordinator._reverse_dns", side_effect=lambda ip: net.dns.get(ip)),
         patch("custom_components.netorbit.coordinator.mdns_name", side_effect=net.mdns_name),
+        patch("custom_components.netorbit.coordinator.scan_ports", side_effect=net.port_scan),
         patch("aiooui.is_loaded", return_value=True),
         patch("aiooui.get_vendor", side_effect=lambda prefix: net.vendors.get(prefix)),
         patch("custom_components.netorbit.snmp.SnmpClient.probe", autospec=True, side_effect=net.snmp_probe),

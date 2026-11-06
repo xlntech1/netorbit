@@ -446,6 +446,7 @@ async def test_llm_tools(hass: HomeAssistant, fake_net, hass_admin_user, caplog)
             "netorbit_update_device": (False, False, True, False),
             "netorbit_ignore_device": (False, True, True, False),
             "netorbit_scan_now": (False, False, True, True),
+            "netorbit_scan_ports": (False, False, True, True),
         }
         assert set(tools) == set(expected)
         for name, flags in expected.items():

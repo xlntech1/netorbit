@@ -27,6 +27,10 @@ from .const import (
     CONF_OFFLINE_AFTER,
     CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
+    CONF_PORT_SCAN_CUSTOM,
+    CONF_PORT_SCAN_HUBS,
+    CONF_PORT_SCAN_INTERVAL,
+    CONF_PORT_SCAN_PORTS,
     CONF_PREFER_DNS,
     CONF_WEAK_AFTER,
     CONF_SNMP_COMMUNITY,
@@ -45,12 +49,15 @@ from .const import (
     MAX_HOSTS,
     MIN_PING_INTERVAL,
     MODES,
+    PORT_SET_CHOICES,
+    PORT_SET_CUSTOM,
     ROOT_HUB_ID,
 )
 from . import manage
 from .coordinator import options_with_defaults
 from .logic import extract_addresses, normalize_mac, validate_subnet
 from .wireless import REGISTRY
+from .ports import parse_ports
 
 # Shown in the "setup finished" dialog (translations can't contain URLs, so it's a placeholder).
 GUIDE_URL = "https://github.com/the-scott-davis/netorbit#add-the-map-to-a-dashboard"
@@ -212,26 +219,39 @@ class NetOrbitOptionsFlow(OptionsFlow):
         return self.async_show_menu(step_id="init", menu_options=menu)
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self.opts.update(
-                {
-                    CONF_MODE: user_input[CONF_MODE],
-                    CONF_PING_INTERVAL: int(user_input[CONF_PING_INTERVAL]),
-                    CONF_DISCOVERY_INTERVAL: int(user_input[CONF_DISCOVERY_INTERVAL]),
-                    CONF_STALE_HOURS: int(user_input[CONF_STALE_HOURS]),
-                    CONF_IGNORE_RANDOM_MAC: user_input[CONF_IGNORE_RANDOM_MAC],
-                    CONF_AUTO_HUBS: user_input[CONF_AUTO_HUBS],
-                    CONF_GROUP_BY_TYPE: user_input[CONF_GROUP_BY_TYPE],
-                    CONF_CHECK_INTERNET: user_input[CONF_CHECK_INTERNET],
-                    CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
-                    CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
-                    CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
-                    CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
-                    CONF_OFFLINE_AFTER: int(user_input[CONF_OFFLINE_AFTER]),
-                    CONF_PORT_COUNTERS: user_input[CONF_PORT_COUNTERS],
-                }
-            )
-            return self._save()
+            custom = (user_input.get(CONF_PORT_SCAN_CUSTOM) or "").strip()
+            if user_input[CONF_PORT_SCAN_PORTS] == PORT_SET_CUSTOM:
+                try:
+                    if not parse_ports(custom):
+                        raise ValueError("empty")
+                except ValueError:
+                    errors[CONF_PORT_SCAN_CUSTOM] = "bad_ports"
+            if not errors:
+                self.opts.update(
+                    {
+                        CONF_MODE: user_input[CONF_MODE],
+                        CONF_PING_INTERVAL: int(user_input[CONF_PING_INTERVAL]),
+                        CONF_DISCOVERY_INTERVAL: int(user_input[CONF_DISCOVERY_INTERVAL]),
+                        CONF_STALE_HOURS: int(user_input[CONF_STALE_HOURS]),
+                        CONF_IGNORE_RANDOM_MAC: user_input[CONF_IGNORE_RANDOM_MAC],
+                        CONF_AUTO_HUBS: user_input[CONF_AUTO_HUBS],
+                        CONF_GROUP_BY_TYPE: user_input[CONF_GROUP_BY_TYPE],
+                        CONF_CHECK_INTERNET: user_input[CONF_CHECK_INTERNET],
+                        CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
+                        CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
+                        CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
+                        CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
+                        CONF_OFFLINE_AFTER: int(user_input[CONF_OFFLINE_AFTER]),
+                        CONF_PORT_COUNTERS: user_input[CONF_PORT_COUNTERS],
+                        CONF_PORT_SCAN_INTERVAL: int(user_input[CONF_PORT_SCAN_INTERVAL]),
+                        CONF_PORT_SCAN_PORTS: user_input[CONF_PORT_SCAN_PORTS],
+                        CONF_PORT_SCAN_CUSTOM: custom,
+                        CONF_PORT_SCAN_HUBS: user_input[CONF_PORT_SCAN_HUBS],
+                    }
+                )
+                return self._save()
         o = self.opts
         schema = vol.Schema(
             {
@@ -251,9 +271,15 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
                     sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
                 ),
+                vol.Required(CONF_PORT_SCAN_INTERVAL, default=o[CONF_PORT_SCAN_INTERVAL]): _int_box(0, 168, "h"),
+                vol.Required(CONF_PORT_SCAN_PORTS, default=o[CONF_PORT_SCAN_PORTS]): _select(PORT_SET_CHOICES, "port_scan_ports"),
+                vol.Optional(CONF_PORT_SCAN_CUSTOM, description={"suggested_value": o.get(CONF_PORT_SCAN_CUSTOM) or None}): str,
+                vol.Required(CONF_PORT_SCAN_HUBS, default=o[CONF_PORT_SCAN_HUBS]): bool,
             }
         )
-        return self.async_show_form(step_id="settings", data_schema=schema)
+        if user_input is not None:
+            schema = self.add_suggested_values_to_schema(schema, user_input)
+        return self.async_show_form(step_id="settings", data_schema=schema, errors=errors)
 
     # ----- Wi-Fi controllers -------------------------------------------------------
 
