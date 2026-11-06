@@ -27,13 +27,18 @@ from .model import (
     BAND_24,
     BAND_5,
     BAND_6,
+    GRADE_FAIR,
+    GRADE_GOOD,
+    GRADE_POOR,
     RADIOS,
     WirelessInfo,
     band_for_channel,
     band_from_text,
     complete,
+    grade,
     merge,
     quality_from,
+    recovered,
 )
 
 REGISTRY: dict[str, type[Controller]] = {FortiGateController.kind: FortiGateController}
@@ -54,7 +59,7 @@ def reader_for(snmp: dict[str, Any] | None) -> AccessPointReader | None:
 
 
 __all__ = [
-    "AP_READERS", "AUTH_TOKEN", "AUTH_USER_PASSWORD", "BAND_24", "BAND_5", "BAND_6", "RADIOS", "REGISTRY",
-    "AccessPointReader", "Controller", "ControllerError", "WirelessInfo", "band_for_channel", "band_from_text",
-    "complete", "controller_for", "has_credentials", "merge", "quality_from", "reader_for",
+    "AP_READERS", "AUTH_TOKEN", "AUTH_USER_PASSWORD", "BAND_24", "BAND_5", "BAND_6", "GRADE_FAIR", "GRADE_GOOD", "GRADE_POOR",
+    "RADIOS", "REGISTRY", "AccessPointReader", "Controller", "ControllerError", "WirelessInfo", "band_for_channel",
+    "band_from_text", "complete", "controller_for", "grade", "has_credentials", "merge", "quality_from", "reader_for", "recovered",
 ]

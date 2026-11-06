@@ -26,6 +26,7 @@ from .const import (
     CONF_MODE,
     CONF_PING_INTERVAL,
     CONF_PREFER_DNS,
+    CONF_WEAK_AFTER,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
@@ -223,6 +224,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
                     CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
                     CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
+                    CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
                 }
             )
             return self._save()
@@ -238,6 +240,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_GROUP_BY_TYPE, default=o[CONF_GROUP_BY_TYPE]): bool,
                 vol.Required(CONF_CHECK_INTERNET, default=o[CONF_CHECK_INTERNET]): bool,
                 vol.Required(CONF_PREFER_DNS, default=o[CONF_PREFER_DNS]): bool,
+                vol.Required(CONF_WEAK_AFTER, default=o[CONF_WEAK_AFTER]): _int_box(0, 1440, "min"),
                 vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
                     sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)

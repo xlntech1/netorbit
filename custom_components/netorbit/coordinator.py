@@ -39,6 +39,7 @@ from .const import (
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
     CONF_SUBNET,
+    CONF_WEAK_AFTER,
     CONF_WIFI_CONTROLLERS,
     DEFAULT_AUTO_HUBS,
     DEFAULT_DISCOVERY_INTERVAL,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
     DEFAULT_STALE_HOURS,
+    DEFAULT_WEAK_AFTER,
     DOMAIN,
     EVENT_DEVICE_RECOVERED,
     EVENT_DEVICE_STALE,
@@ -92,7 +94,7 @@ from .logic import (
 from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
-from .wireless import AccessPointReader, ControllerError, WirelessInfo, controller_for, merge as merge_wireless, reader_for
+from .wireless import GRADE_GOOD, AccessPointReader, ControllerError, WirelessInfo, controller_for, grade as signal_grade, merge as merge_wireless, reader_for, recovered as signal_recovered
 from .wireless.entities import match_entities, read_entities, read_linked
 from .wireless.tracker import tracker_wireless_by_mac
 from .topology import Topology, infer, macs_close
@@ -170,6 +172,7 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_SNMP_ENABLED, DEFAULT_SNMP_ENABLED)
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
     opts.setdefault(CONF_WIFI_CONTROLLERS, [])
+    opts.setdefault(CONF_WEAK_AFTER, DEFAULT_WEAK_AFTER)
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -226,6 +229,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._ctrl_clients: dict[str, WirelessInfo] = {}  # client mac -> what the Wi-Fi controllers say
         self._ctrl_last: dict[str, dict[str, WirelessInfo]] = {}  # per controller, its last good answer
         self._ctrl_backoff: dict[str, datetime] = {}  # controllers that failed: do not ask again before this
+        self._weak_since: dict[str, datetime] = {}  # node key -> when its signal last dropped below good
         self._suggestions: list[dict[str, Any]] = []
         self._community_asked: set[str] = set()  # IPs already asked with the custom SNMP community
         self._registry: dict[str, Any] = {}
@@ -1114,7 +1118,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 ip_changes=rec.get("ip_changes", 0),
                 vendor=own.get("vendor"),
                 **manage.stored_text(hub),
-                wireless=self._wireless_for(hub.get("mac") or rec.get("mac"), hub), entities=hub.get("entities"),
+                wireless=self._mark_weak(key, self._wireless_for(hub.get("mac") or rec.get("mac"), hub), now), entities=hub.get("entities"),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1143,7 +1147,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 source="manual" if key in devices else "discovered",
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
                 **manage.stored_text(cfg),
-                wireless=self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), entities=cfg.get("entities"),
+                wireless=self._mark_weak(key, self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), now), entities=cfg.get("entities"),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,
@@ -1184,6 +1188,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     "last_seen": rec.get("last_seen"), "vendor": rec.get("vendor"),
                 })
             new_devices.sort(key=lambda d: d.get("first_seen") or "", reverse=True)
+
+        for key in [k for k in self._weak_since if k not in nodes]:
+            self._weak_since.pop(key, None)
 
         hub_mac_set = set(self._hub_macs().values())
         suggestions = [s for s in self._suggestions if s["key"] not in hub_mac_set and s["key"] not in self.opts[CONF_DISMISSED_HUBS]]
@@ -1264,6 +1271,24 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             parts.append(read_linked(self.hass, links))
         info = merge_wireless(*parts)
         return info.as_dict() if info else None
+
+    def _mark_weak(self, key: str, wireless: dict[str, Any] | None, now: datetime) -> dict[str, Any] | None:
+        """Note since when a node's signal has read below good, and flag it `weak` once that has lasted
+        the minutes set under Settings (0 turns the flag off).
+
+        The clock starts at the first reading below good and stops only once the signal reads clearly
+        good again (`wireless.recovered`: a band above the threshold), so a device hovering at the
+        threshold counts as weak instead of restarting the clock with every bit of jitter. No reading
+        at all clears it too. The card draws a weak node in a colour between online and seen-recently.
+        """
+        if wireless is None or signal_grade(wireless) is None or (key not in self._weak_since and signal_grade(wireless) == GRADE_GOOD) or signal_recovered(wireless):
+            self._weak_since.pop(key, None)
+            return wireless
+        since = self._weak_since.setdefault(key, now)
+        minutes = int(self.opts.get(CONF_WEAK_AFTER) or 0)
+        wireless["weak_since"] = since.isoformat()
+        wireless["weak"] = bool(minutes) and now - since >= timedelta(minutes=minutes)
+        return wireless
 
     # ----- lookups used by services, the options flow and AI tools ------------
 

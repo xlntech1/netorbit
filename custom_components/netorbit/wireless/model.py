@@ -17,6 +17,18 @@ BAND_24 = "2.4 GHz"
 BAND_5 = "5 GHz"
 BAND_6 = "6 GHz"
 
+# How a signal reads, with the thresholds people already use on their dashboards:
+# good from LQI 80 / -80 dBm / quality 40, fair from LQI 40 / -90 dBm / quality 20, poor below.
+GRADE_GOOD = "good"
+GRADE_FAIR = "fair"
+GRADE_POOR = "poor"
+# A weak-signal clock started below good only stops once the signal reads clearly good again (a band
+# above the threshold), so a device hovering at -79/-81 dBm counts as weak instead of restarting the
+# clock with every bit of jitter: LQI 100 / -75 dBm / quality 50.
+RECOVER_LQI = 100
+RECOVER_DBM = -75
+RECOVER_QUALITY = 50
+
 
 @dataclass
 class WirelessInfo:
@@ -35,6 +47,10 @@ class WirelessInfo:
     quality: int | None = None  # 0-100
     source: str | None = None  # "entity:<id>", "tracker:<id>", "linked:<id>" or "<kind>:<controller name>"
     at: str | None = None
+    # Filled by the coordinator, not by sources: since when the signal has read below good, and whether
+    # that has lasted long enough (Settings > Weak signal after) to colour the node on the map.
+    weak_since: str | None = None
+    weak: bool | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None and k != "mac"}
@@ -87,6 +103,40 @@ def quality_from(signal_dbm: float | None, lqi: int | None) -> int | None:
     if signal_dbm is not None:
         return max(0, min(100, int(round((float(signal_dbm) + 100) * 2))))
     return None
+
+
+def grade(info: WirelessInfo | dict[str, Any] | None) -> str | None:
+    """good, fair or poor from the LQI when there is one, else the dBm, else the quality; None when nothing is known.
+
+    The same thresholds as the card's colours, so the map and the popup agree.
+    """
+    if info is None:
+        return None
+    get = info.get if isinstance(info, dict) else lambda k: getattr(info, k)
+    lqi, dbm, quality = to_int(get("lqi")), to_float(get("signal_dbm")), to_int(get("quality"))
+    if lqi is not None:
+        return GRADE_GOOD if lqi >= 80 else GRADE_FAIR if lqi >= 40 else GRADE_POOR
+    if dbm is not None:
+        return GRADE_GOOD if dbm >= -80 else GRADE_FAIR if dbm >= -90 else GRADE_POOR
+    if quality is not None:
+        return GRADE_GOOD if quality >= 40 else GRADE_FAIR if quality >= 20 else GRADE_POOR
+    return None
+
+
+def recovered(info: WirelessInfo | dict[str, Any] | None) -> bool:
+    """True once a signal reads clearly good (the band above the good threshold), the point where a
+    weak-signal clock stops. Nothing known counts as not recovered; the caller decides what that means."""
+    if info is None:
+        return False
+    get = info.get if isinstance(info, dict) else lambda k: getattr(info, k)
+    lqi, dbm, quality = to_int(get("lqi")), to_float(get("signal_dbm")), to_int(get("quality"))
+    if lqi is not None:
+        return lqi >= RECOVER_LQI
+    if dbm is not None:
+        return dbm >= RECOVER_DBM
+    if quality is not None:
+        return quality >= RECOVER_QUALITY
+    return False
 
 
 def complete(info: WirelessInfo) -> WirelessInfo:

@@ -12,6 +12,26 @@ const NO_STATUS = {
   unknown: { color: "#64748b", label: "Unknown" },
 };
 
+// An online device whose radio signal has read below good for a while (Settings > Weak signal after) is drawn
+// in a yellow-green between online and seen-recently, so the ring shows at a glance which devices struggle.
+const NO_WEAK = { color: "#a3e635", light: "#d9f99d", label: "Weak signal" };
+
+// The colour a node is drawn in: its status, except an online node with a weak signal. Exported for tests.
+function noTone(n) {
+  if (!n) return "unknown";
+  return n.status === "online" && n.wireless && n.wireless.weak ? "weak" : n.status;
+}
+
+// How long since an ISO time, for "weak signal for 12 min": "12 min", "3 h", "2 d".
+function noDur(iso) {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  if (isNaN(t)) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + " min";
+  if (s < 86400) return Math.round(s / 3600) + " h";
+  return Math.round(s / 86400) + " d";
+}
+
 // Icon name -> SVG path data, shared by every card on the page (see _resolveIcons).
 const NO_ICON_PATHS = new Map();
 const NO_ICON_PENDING = new Set();
@@ -129,7 +149,7 @@ function noSignalColor(w) {
 // The coarse part of the radio details: a redraw per dBm would make the map twitch every ping round.
 function noWirelessSig(w) {
   if (!w) return "";
-  return [w.radio, w.ap_name, w.ssid, w.band, w.channel, w.quality == null ? "" : Math.round(w.quality / 10)].join("/");
+  return [w.radio, w.ap_name, w.ssid, w.band, w.channel, w.quality == null ? "" : Math.round(w.quality / 10), w.weak ? "w" : ""].join("/");
 }
 
 // Who gave the signal: "fortigate:Edge" -> "Edge", "entity:sensor.x" -> "its own sensor", trackers and links by kind.
@@ -161,7 +181,15 @@ function netorbitLayout(model, opts) {
   // By label, or by "sort" where a node has one (a shared map keeps the card's order with generic names).
   const lab = (n) => String(n.sort != null ? n.sort : n.label);
   const byLabel = (a, b) => lab(a).localeCompare(lab(b));
-  Object.values(kidsDev).forEach((a) => a.sort(byLabel));
+  // Under each hub: devices without a radio link by name, then wireless ones strongest first, in steps of ten
+  // (the same steps as the redraw signature) so a change of one dBm never moves anything; signal unknown last.
+  const sigRank = (d) => (!d.wireless ? -1 : d.wireless.quality == null ? 0 : 1 + Math.round(Number(d.wireless.quality) / 10));
+  const bySignal = (a, b) => {
+    const ra = sigRank(a), rb = sigRank(b);
+    if ((ra < 0) !== (rb < 0)) return ra < 0 ? -1 : 1;
+    return (rb - ra) || byLabel(a, b);
+  };
+  Object.values(kidsDev).forEach((a) => a.sort(bySignal));
   Object.values(kidsHub).forEach((a) => a.sort((x, y) => {
     // keep the "new devices" bubble last
     if (x === "__new") return 1;
@@ -279,7 +307,7 @@ function netorbitDraw(model, cfg, opts) {
   const L = netorbitLayout(model, {});
   const pos = L.pos;
   const C = pos[root];
-  const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
+  const col = (s) => (s === "group" ? "#64748b" : s === "weak" ? NO_WEAK.color : (NO_STATUS[s] || NO_STATUS.unknown).color);
   const live = (s) => s === "online";
   const fs = Math.max(9, Math.min(12.5, L.arc * 0.42));
   const maxChars = L.N > 60 ? 16 : 22;
@@ -320,7 +348,7 @@ function netorbitDraw(model, cfg, opts) {
   devices.forEach((d) => {
     const p = pos[d.key];
     if (!p || !pos[p.hub]) return;
-    link(d.key, `${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""} ${d.suggested ? "sug" : ""}`, curve(pos[p.hub], p), d.suggested ? NO_SUGGEST.color : col(d.status));
+    link(d.key, `${live(d.status) ? "live" : ""} ${d.kind === "new" ? "dashed" : ""} ${d.suggested ? "sug" : ""}`, curve(pos[p.hub], p), d.suggested ? NO_SUGGEST.color : col(noTone(d)));
   });
 
   // Icons are drawn as SVG paths, not <ha-icon> in a <foreignObject>: WebKit (Safari, the iOS/iPadOS companion
@@ -400,7 +428,7 @@ function netorbitDraw(model, cfg, opts) {
   devices.forEach((d) => {
     const p = pos[d.key];
     if (!p) return;
-    const c = d.suggested ? NO_SUGGEST.color : col(d.status);
+    const c = d.suggested ? NO_SUGGEST.color : col(noTone(d));
     const deg = (p.a * 180) / Math.PI;
     const nd = ((deg % 360) + 360) % 360;
     const flip = nd > 90 && nd < 270;
@@ -409,7 +437,7 @@ function netorbitDraw(model, cfg, opts) {
     const rot = flip ? deg + 180 : deg;
     const pinned = edit && d.placement === "manual";
     const text = noTrunc(d.label, maxChars);
-    gfx += `<g class="node dev ${d.status} ${d.sleepy ? "sleepy" : ""} ${d.pending ? "pending" : ""} ${pinned ? "pinned" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
+    gfx += `<g class="node dev ${d.status} ${noTone(d) === "weak" ? "weak" : ""} ${d.sleepy ? "sleepy" : ""} ${d.pending ? "pending" : ""} ${pinned ? "pinned" : ""} ${edit && d.kind === "device" ? "draggable" : ""}" data-key="${noEsc(d.key)}">` +
       (d.pending ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="pendring"/>` : "") +
       (live(d.status) ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="halo" fill="${c}"/>` : "") +
       (d.suggested ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="21" class="sugring"/>` : "") +
@@ -437,10 +465,11 @@ function netorbitDraw(model, cfg, opts) {
     scene.hubLabels.push({ k: "internet", x: ip.x + 24, y: ip.y + 5, text, anchor: "start", inet: true, color: inet.status === "stale" ? c : null });
   }
 
-  const counts = { online: 0, recent: 0, stale: 0, new: 0 };
+  const counts = { online: 0, recent: 0, stale: 0, new: 0, weak: 0 };
   devices.forEach((d) => {
-    if (d.kind === "more") { d.members.forEach((m) => { if (counts[m.status] !== undefined) counts[m.status]++; }); return; }
+    if (d.kind === "more") { d.members.forEach((m) => { if (counts[m.status] !== undefined) counts[m.status]++; if (noTone(m) === "weak") counts.weak++; }); return; }
     if (counts[d.status] !== undefined && !String(d.key).startsWith("sug:")) counts[d.status]++;
+    if (noTone(d) === "weak" && !String(d.key).startsWith("sug:")) counts.weak++;
   });
   return { L, pos, C, links, gfx, labels, counts, scene };
 }
@@ -1173,6 +1202,8 @@ class NetOrbitCard extends HTMLElement {
     this._pos = pos;
     const C = D.C;
     const counts = D.counts;
+    const nWeak = counts.weak || 0;
+    const weakMin = summary ? Number(summary.attributes.weak_after_minutes) || 0 : 0;
     const admin = this._isAdmin();
     const nSug = Object.keys(model.suggestions || {}).length;
     const chip = (k) => `<span class="chip"><i style="background:${NO_STATUS[k].color}"></i>${counts[k]} ${NO_STATUS[k].label}</span>`;
@@ -1232,6 +1263,7 @@ class NetOrbitCard extends HTMLElement {
   .hsub { fill:#94a3b8; font-size:12px; text-anchor:middle; paint-order:stroke; stroke:#0b1220; stroke-width:4px; }
   .dlab { fill:#cbd5e1; }
   .dev.recent .dlab { fill:#fde68a; }
+  .dev.weak .dlab { fill:${NO_WEAK.light}; }
   .dev.stale .dlab { fill:#fecaca; }
   .dev.new .dlab { fill:#e9d5ff; }
   .dev.sleepy:not(.online) { opacity:.7; }
@@ -1347,7 +1379,7 @@ class NetOrbitCard extends HTMLElement {
 <ha-card class="${mode === "reveal" ? "revealing" : ""}">
   <div class="head">
     <div class="title"><ha-icon icon="mdi:orbit"></ha-icon>${noEsc(cfg.title)}</div>
-    ${takeover ? scanChip : `${chip("online")}${chip("recent")}${chip("stale")}${counts.new ? chip("new") : ""}
+    ${takeover ? scanChip : `${chip("online")}${nWeak ? `<span class="chip"><i style="background:${NO_WEAK.color}"></i>${nWeak} weak signal</span>` : ""}${chip("recent")}${chip("stale")}${counts.new ? chip("new") : ""}
     ${nSug ? `<span class="chip sug"><i style="background:${NO_SUGGEST.color}"></i>${nSug} possible hub${nSug > 1 ? "s" : ""}</span>` : ""}
     ${scanChip}
     ${share ? `<button class="sharebtn" title="Share an image or video of your map"><ha-icon icon="mdi:share-variant"></ha-icon>Share</button>` : ""}
@@ -1369,6 +1401,7 @@ class NetOrbitCard extends HTMLElement {
   </div>
   ${cfg.show_legend ? `<div class="legend ${takeover ? "hide" : ""}">
     <span>Moving line = answering pings</span>
+    ${weakMin ? `<span><i class="dot" style="background:${NO_WEAK.color}"></i>Online, weak signal for ${noEsc(weakMin)} min+</span>` : ""}
     <span><i class="dot" style="background:${NO_STATUS.recent.color}"></i>Seen in the last ${noEsc(staleH)} h</span>
     <span><i class="dot" style="background:${NO_STATUS.stale.color}"></i>Not seen for ${noEsc(staleH)} h+</span>
     <span><i class="dot" style="background:#a78bfa"></i>Allowed to sleep</span>
@@ -1787,7 +1820,7 @@ class NetOrbitCard extends HTMLElement {
     devices.forEach((d) => (all[d.key] = d));
     if (model.internet) all.internet = model.internet;
     const root = model.root;
-    const col = (s) => (s === "group" ? "#64748b" : (NO_STATUS[s] || NO_STATUS.unknown).color);
+    const col = (s) => (s === "group" ? "#64748b" : s === "weak" ? NO_WEAK.color : (NO_STATUS[s] || NO_STATUS.unknown).color);
     const tip = this.shadowRoot.querySelector(".tip");
     const wrap = this.shadowRoot.querySelector(".wrap");
     const svg = this.shadowRoot.querySelector("svg.map");
@@ -2034,7 +2067,7 @@ class NetOrbitCard extends HTMLElement {
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
     return `<b>${noEsc(n.label)}</b>` +
       (n.suggested ? `<div style="color:${NO_SUGGEST.light}">Might be a ${noEsc((n.suggested.type || "hub").replace("_", " "))}: ${noEsc((n.suggested.reasons || []).join(", "))}</div>` : "") +
-      `<div><span class="k">Status</span><span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · sleeps" : ""}</div>` +
+      `<div><span class="k">Status</span><span style="color:${col(noTone(n))}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${noTone(n) === "weak" ? ` · <span style="color:${NO_WEAK.color}">weak signal for ${noEsc(noDur(n.wireless.weak_since))}</span>` : ""}${n.sleepy ? " · sleeps" : ""}</div>` +
       (n.ip ? `<div><span class="k">IP</span>${noEsc(n.ip)}</div>` : "") +
       (n.mac ? `<div><span class="k">MAC</span>${noEsc(n.mac)}</div>` : "") +
       (n.vendor ? `<div><span class="k">Maker</span>${noEsc(n.vendor)}</div>` : "") +
@@ -2381,7 +2414,7 @@ class NetOrbitCard extends HTMLElement {
     const w = n.wireless;
     const signalHtml = w ? `<span style="color:${noSignalColor(w)}">${noEsc(noWirelessLine(w))}</span>${w.quality != null ? `<span class="qbar"><i style="width:${w.quality}%;background:${noSignalColor(w)}"></i></span>` : ""}${w.source ? ` <span class="muted">from ${noEsc(noSourceLabel(w.source))}</span>` : ""}` : "";
     const html =
-      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(what)} · <span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · allowed to sleep" : ""}</div>` +
+      `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(what)} · <span style="color:${col(noTone(n))}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${noTone(n) === "weak" ? ` · <span style="color:${NO_WEAK.color}">weak signal for ${noEsc(noDur(n.wireless.weak_since))}</span>` : ""}${n.sleepy ? " · allowed to sleep" : ""}</div>` +
       `<div class="kv">${row("DNS name", dns && dns !== n.label ? noEsc(dns) : "")}${row("IP", noEsc(n.ip))}${row("MAC", noEsc(n.mac))}${row("Maker", noEsc(n.vendor))}</div>` +
       `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${row("Signal", signalHtml)}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
       (managed || fields ? `<div class="sec">Fields</div><div class="kv">${row("Managed by", managed)}${fields}</div>` : "") +
@@ -2516,5 +2549,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

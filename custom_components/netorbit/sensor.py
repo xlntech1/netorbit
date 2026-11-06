@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import NetOrbitConfigEntry
-from .const import CONF_MODE, CONF_STALE_HOURS, DOMAIN, STATUSES, VERSION
+from .const import CONF_MODE, CONF_STALE_HOURS, CONF_WEAK_AFTER, DOMAIN, STATUSES, VERSION
 from .coordinator import NetOrbitCoordinator, Node
 
 
@@ -163,10 +163,13 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data
         counts = {s: 0 for s in STATUSES}
+        weak = 0
         if data:
             for node in data.nodes.values():
                 if node.kind == "device":
                     counts[node.status] = counts.get(node.status, 0) + 1
+                if node.kind == "device" and node.status == "online" and (node.wireless or {}).get("weak"):
+                    weak += 1
         opts = self.coordinator.opts
         scan = self.coordinator.scan
         return {
@@ -175,6 +178,8 @@ class NetOrbitSummarySensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity
             "mode": opts[CONF_MODE],
             "stale_hours": opts[CONF_STALE_HOURS],
             "counts": counts,
+            "weak_signal": weak,
+            "weak_after_minutes": opts.get(CONF_WEAK_AFTER),
             "new_devices": [
                 {**d, "mac": d["mac"].upper() if d.get("mac") else None}
                 for d in (data.new_devices if data else [])

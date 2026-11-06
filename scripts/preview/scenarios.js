@@ -29,7 +29,7 @@
 
   function summary(states, fresh, suggested = []) {
     states["sensor.netorbit_devices_online"] = { entity_id: "sensor.netorbit_devices_online", state: "0", attributes: {
-      netorbit: true, kind: "summary", stale_hours: 24, mode: "manual", config_entry_id: "preview", group_by_type: true,
+      netorbit: true, kind: "summary", stale_hours: 24, mode: "manual", config_entry_id: "preview", group_by_type: true, weak_after_minutes: 10,
       suggested_hubs: suggested.map(([name, type, reasons]) => { const m = mac(); return { key: m.toLowerCase(), mac: m, ip: "192.0.2." + (220 + n), name, type, reasons }; }),
       new_devices: fresh.map((name, i) => ({ key: "new" + i, name, mac: mac(), ip: "192.0.2." + (200 + i), first_seen: ago(1), last_seen: ago(0) })) } };
     // ?internet=down shows an outage, ?internet=off leaves the node out.
@@ -128,7 +128,9 @@
     // Radio details: a controller knows the AP, band and channel; a plain sensor only the signal.
     Object.assign(byLabel("Smart Plug").attributes, { wireless: { radio: "wifi", ap_name: "Den AP", ssid: "IoT", band: "2.4 GHz", channel: 6, signal_dbm: -61, snr: 34, quality: 78, source: "fortigate:Edge", at: scanned } });
     Object.assign(byLabel("Streamer").attributes, { wireless: { radio: "wifi", ssid: "Home", band: "5 GHz", channel: 44, signal_dbm: -72, quality: 56, source: "tracker:device_tracker.streamer", at: scanned } });
-    Object.assign(byLabel("Doorbell").attributes, { wireless: { radio: "wifi", signal_dbm: -91, quality: 18, source: "entity:sensor.doorbell_rssi", at: scanned } });
+    // The doorbell has read poor for 25 minutes (drawn yellow-green); the purifier dipped 3 minutes ago (still green).
+    Object.assign(byLabel("Doorbell").attributes, { wireless: { radio: "wifi", signal_dbm: -91, quality: 18, source: "entity:sensor.doorbell_rssi", at: scanned, weak_since: new Date(Date.now() - 25 * 60e3).toISOString(), weak: true } });
+    Object.assign(byLabel("Air Purifier").attributes, { wireless: { radio: "wifi", ap_name: "Den AP", ssid: "IoT", band: "2.4 GHz", channel: 6, signal_dbm: -84, snr: 12, quality: 32, source: "fortigate:Edge", at: scanned, weak_since: new Date(Date.now() - 3 * 60e3).toISOString(), weak: false } });
     Object.assign(byLabel("Thermostat 1F").attributes, { wireless: { radio: "thread", lqi: 196, signal_dbm: -64, quality: 77, source: "entity:sensor.thermostat_rssi", at: scanned }, linked_entities: { signal: "sensor.thermostat_rssi" } });
   })();
 })();

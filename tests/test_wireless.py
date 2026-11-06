@@ -17,9 +17,11 @@ from custom_components.netorbit.wireless import (
     band_for_channel,
     band_from_text,
     controller_for,
+    grade,
     merge,
     quality_from,
     reader_for,
+    recovered,
 )
 from custom_components.netorbit.wireless.entities import classify_entity, radio_for
 from custom_components.netorbit.wireless.fortigate import FortiGateController, parse_client
@@ -44,6 +46,18 @@ def test_merge_later_sources_win_field_by_field() -> None:
     assert merge(first, second).as_dict() == {"radio": "wifi", "ap_name": "Hall AP", "ssid": "Home", "band": "5 GHz", "channel": 44,
                                               "signal_dbm": -61, "snr": 37, "quality": 78, "source": "b"}
     assert merge(None, None) is None
+
+
+def test_grade_uses_the_card_thresholds() -> None:
+    assert grade(WirelessInfo(lqi=212, signal_dbm=-95)) == "good"  # LQI first
+    assert grade(WirelessInfo(lqi=60)) == "fair" and grade(WirelessInfo(lqi=30)) == "poor"
+    assert grade(WirelessInfo(signal_dbm=-80)) == "good" and grade(WirelessInfo(signal_dbm=-85)) == "fair" and grade(WirelessInfo(signal_dbm=-91)) == "poor"
+    assert grade({"quality": 40}) == "good" and grade({"quality": 25}) == "fair" and grade({"quality": 5}) == "poor"
+    assert grade(WirelessInfo(ssid="Home")) is None and grade(None) is None and grade({"signal_dbm": "junk"}) is None
+    # Recovery needs a band above good, so jitter around the threshold never stops a weak-signal clock.
+    assert recovered(WirelessInfo(signal_dbm=-75)) and not recovered(WirelessInfo(signal_dbm=-78))
+    assert recovered(WirelessInfo(lqi=100, signal_dbm=-95)) and not recovered(WirelessInfo(lqi=90))
+    assert recovered({"quality": 50}) and not recovered({"quality": 45}) and not recovered(None) and not recovered(WirelessInfo(ssid="x"))
 
 
 def test_merge_order_and_quality_reset() -> None:

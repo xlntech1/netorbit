@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -572,7 +572,40 @@ test("wireless line, colour and coarse signature", () => {
   assert.strictEqual(noSignalColor(null), "#94a3b8");
   assert.strictEqual(noWirelessSig(w), noWirelessSig(Object.assign({}, w, { signal_dbm: -62, quality: 76 })));
   assert.notStrictEqual(noWirelessSig(w), noWirelessSig(Object.assign({}, w, { channel: 36 })));
+  assert.notStrictEqual(noWirelessSig(w), noWirelessSig(Object.assign({}, w, { weak: true })));
   assert.strictEqual(noSourceLabel("fortigate:Edge"), "Edge");
   assert.strictEqual(noSourceLabel("entity:sensor.plug_rssi"), "its own sensor");
   assert.strictEqual(noSourceLabel("linked:sensor.x"), "linked sensor");
+});
+
+test("an online device with a long weak signal gets its own tone; others keep their status", () => {
+  const since = new Date(Date.now() - 25 * 60e3).toISOString();
+  assert.strictEqual(noTone({ status: "online", wireless: { signal_dbm: -88, weak: true, weak_since: since } }), "weak");
+  assert.strictEqual(noTone({ status: "online", wireless: { signal_dbm: -88, weak: false, weak_since: since } }), "online");
+  assert.strictEqual(noTone({ status: "recent", wireless: { signal_dbm: -88, weak: true, weak_since: since } }), "recent");
+  assert.strictEqual(noTone({ status: "online" }), "online");
+  assert.strictEqual(noTone(null), "unknown");
+  assert.strictEqual(noDur(since), "25 min");
+  assert.strictEqual(noDur(new Date(Date.now() - 3 * 3600e3).toISOString()), "3 h");
+  assert.strictEqual(noDur(new Date(Date.now() - 2 * 86400e3).toISOString()), "2 d");
+  assert.strictEqual(noDur(null), "");
+});
+
+test("under a hub, wired devices come by name and wireless ones strongest first", () => {
+  const hubs = { r: { key: "r", parent: null, label: "r" }, ap: { key: "ap", parent: "r", label: "ap" } };
+  const devices = [
+    { key: "weak", link: "ap", label: "Aardvark", wireless: { quality: 18 } },
+    { key: "mid", link: "ap", label: "Zebra", wireless: { quality: 58 } },
+    { key: "strong", link: "ap", label: "Mole", wireless: { quality: 78 } },
+    { key: "unknown", link: "ap", label: "Bat", wireless: { ssid: "Home" } },
+    { key: "wired2", link: "ap", label: "Yak" },
+    { key: "wired1", link: "ap", label: "Cat" },
+    { key: "same-step", link: "ap", label: "Ant", wireless: { quality: 76 } },
+  ];
+  const L = netorbitLayout({ hubs, devices, root: "r" });
+  const order = L.slots.filter((s) => s.type === "dev").map((s) => s.d.key);
+  assert.deepStrictEqual(order, ["wired1", "wired2", "same-step", "strong", "mid", "weak", "unknown"]);
+  // One dBm more or less keeps the order (steps of ten, like the redraw signature).
+  devices.find((d) => d.key === "mid").wireless.quality = 55;
+  assert.deepStrictEqual(netorbitLayout({ hubs, devices, root: "r" }).slots.filter((s) => s.type === "dev").map((s) => s.d.key), order);
 });

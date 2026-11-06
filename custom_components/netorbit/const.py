@@ -28,6 +28,7 @@ CONF_WIFI_CONTROLLERS: Final = "wifi_controllers"  # Wi-Fi controllers NetOrbit 
 CONF_GROUP_BY_TYPE: Final = "group_by_type"
 CONF_CHECK_INTERNET: Final = "check_internet"
 CONF_PREFER_DNS: Final = "prefer_dns_names"
+CONF_WEAK_AFTER: Final = "weak_signal_minutes"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -41,6 +42,8 @@ DEFAULT_IGNORE_RANDOM_MAC: Final = True
 DEFAULT_AUTO_HUBS: Final = True
 DEFAULT_SNMP_ENABLED: Final = True
 DEFAULT_PREFER_DNS: Final = False
+# A device whose signal has read below good for this many minutes is drawn in the weak-signal colour; 0 = never.
+DEFAULT_WEAK_AFTER: Final = 10
 SNMP_DEFAULT_COMMUNITY: Final = "public"
 
 # Free text people attach to a hub or device ("Managed by", extra fields)

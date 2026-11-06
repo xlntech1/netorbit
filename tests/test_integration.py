@@ -787,3 +787,56 @@ async def test_wifi_controller_signal_and_placement(hass: HomeAssistant, fake_ne
     flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"controller": entry.options["wifi_controllers"][1]["id"]})
     flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": "Second", "host": "192.0.2.2", "port": 443, "verify_ssl": False, "remove": True})
     assert flow["type"] is FlowResultType.CREATE_ENTRY and [c["name"] for c in entry.options["wifi_controllers"]] == ["Edge"]
+
+
+async def test_weak_signal_is_flagged_after_a_while(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """A signal below good notes weak_since at once and sets `weak` after weak_signal_minutes; a good reading clears both."""
+    from homeassistant.helpers import device_registry as dr, entity_registry as er  # noqa: PLC0415
+
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    other = MockConfigEntry(domain="esphome", title="ESPHome")
+    other.add_to_hass(hass)
+    dev_reg, ent_reg = dr.async_get(hass), er.async_get(hass)
+    dev = dev_reg.async_get_or_create(config_entry_id=other.entry_id, identifiers={("esphome", "plug")}, connections={(dr.CONNECTION_NETWORK_MAC, MAC_B)}, name="Plug")
+    ent_reg.async_get_or_create("sensor", "esphome", "plug-rssi", device_id=dev.id, suggested_object_id="plug_rssi",
+                                original_device_class="signal_strength", unit_of_measurement="dBm")
+    rssi = {"unit_of_measurement": "dBm", "device_class": "signal_strength"}
+    hass.states.async_set("sensor.plug_rssi", "-86", rssi)
+    entry = _entry("auto", weak_signal_minutes=10)
+    await _setup(hass, entry)
+
+    def wireless():
+        return _node_states(hass)["Plug"].attributes["wireless"]
+
+    w = wireless()
+    assert w["signal_dbm"] == -86 and w["weak"] is False and w["weak_since"]
+    since = w["weak_since"]
+    assert _summary(hass).attributes["weak_signal"] == 0 and _summary(hass).attributes["weak_after_minutes"] == 10
+    await _advance(hass, freezer, 5 * 60 + 1)
+    assert wireless()["weak"] is False and wireless()["weak_since"] == since  # the clock keeps its start
+    # A reading just over the threshold is jitter, not recovery: the clock keeps running.
+    hass.states.async_set("sensor.plug_rssi", "-78", rssi)
+    await _advance(hass, freezer, 61)
+    assert wireless()["signal_dbm"] == -78 and wireless()["weak_since"] == since
+    hass.states.async_set("sensor.plug_rssi", "-86", rssi)
+    await _advance(hass, freezer, 5 * 60 + 1)
+    assert wireless()["weak"] is True and wireless()["weak_since"] == since
+    assert _summary(hass).attributes["weak_signal"] == 1
+    # A device that never dipped does not start a clock at -78 either.
+    assert "weak_since" not in (_node_states(hass)["Router"].attributes.get("wireless") or {})
+
+    # A clearly good reading clears the flag and the clock; the next dip starts a new clock.
+    hass.states.async_set("sensor.plug_rssi", "-70", rssi)
+    await _advance(hass, freezer, 61)
+    assert "weak" not in wireless() and "weak_since" not in wireless()
+    assert _summary(hass).attributes["weak_signal"] == 0
+    hass.states.async_set("sensor.plug_rssi", "-86", rssi)
+    await _advance(hass, freezer, 61)
+    assert wireless()["weak"] is False and wireless()["weak_since"] != since
+
+    # 0 minutes in Settings never colours anything, though the popup can still say since when.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "weak_signal_minutes": 0})
+    await hass.async_block_till_done()
+    await _advance(hass, freezer, 30 * 60)
+    assert wireless()["weak"] is False and wireless()["weak_since"]

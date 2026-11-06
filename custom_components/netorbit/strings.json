@@ -61,7 +61,8 @@
           "check_internet": "Show the internet on the map",
           "snmp_enabled": "Read MAC tables from managed switches (SNMP)",
           "snmp_community": "SNMP community (password)",
-          "prefer_dns_names": "Prefer DNS and Bonjour names"
+          "prefer_dns_names": "Prefer DNS and Bonjour names",
+          "weak_signal_minutes": "Weak signal after"
         },
         "data_description": {
           "discovery_interval": "How often the whole subnet is swept for new devices.",
@@ -72,7 +73,8 @@
           "check_internet": "Each ping round also pings two public DNS servers (1.1.1.1 and 8.8.8.8). The Internet node turns red when neither answers for two rounds while your router still does, and fires netorbit_internet_down and netorbit_internet_up events.",
           "snmp_enabled": "NetOrbit asks each device once an hour whether it is a managed switch, using read-only SNMP, then reads the switch's MAC table to place devices automatically.",
           "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here.",
-          "prefer_dns_names": "Show the name your network gives a device (reverse DNS, or the name it announces over Bonjour) before names from other integrations, and use it for hubs NetOrbit named itself, such as the router. Names you typed are always kept."
+          "prefer_dns_names": "Show the name your network gives a device (reverse DNS, or the name it announces over Bonjour) before names from other integrations, and use it for hubs NetOrbit named itself, such as the router. Names you typed are always kept.",
+          "weak_signal_minutes": "A device whose radio signal has read below good (−80 dBm, LQI 80) for this many minutes is drawn in a yellow-green between online and seen-recently, and the popup says for how long; the clock only stops once the signal reads clearly good again (−75 dBm, LQI 100), so a device hovering at the threshold counts. 0 never colours it."
         }
       },
       "add_hub": {
