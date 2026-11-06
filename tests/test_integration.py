@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from freezegun.api import FrozenDateTimeFactory
 import pytest
@@ -178,6 +179,19 @@ async def test_address_handed_to_another_device(hass: HomeAssistant, fake_net, f
     assert _node_states(hass)[moved].state == "online"
     assert _node_states(hass)[moved].attributes["ip"] == "192.0.2.11"
     assert _node_states(hass)[gone].state == "recent"
+
+
+async def test_arp_is_read_once_per_update(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """An update that sweeps reads ARP once: the ping round after the sweep uses the sweep's table."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    await _setup(hass, _entry("auto"))
+    with patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(fake_net.arp)) as read_arp:
+        await _advance(hass, freezer, 301)  # a sweep and a ping round
+        assert read_arp.call_count == 1
+        await _advance(hass, freezer, 61)  # a ping round only
+        assert read_arp.call_count == 2
+    assert _node_states(hass)["Device 53:0B"].state == "online"
 
 
 async def test_hub_mac_not_in_arp_still_answers(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:

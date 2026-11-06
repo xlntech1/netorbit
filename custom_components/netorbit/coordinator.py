@@ -326,9 +326,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         if self._privileged is None:
             raise UpdateFailed("ICMP sockets are not permitted on this system")
         try:
-            if sweep_due:
-                await self._sweep(now)
-            alive = await self._ping_tracked()
+            arp = await self._sweep(now) if sweep_due else None
+            alive = await self._ping_tracked(arp)
         except OSError as err:
             raise UpdateFailed(f"Network error: {err}") from err
 
@@ -365,8 +364,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         data = self._build(now, self._alive_keys)
         self.async_set_updated_data(data)
 
-    async def _sweep(self, now: datetime) -> None:
-        """Ping every address, read ARP, then work out hubs and layout."""
+    async def _sweep(self, now: datetime) -> dict[str, str]:
+        """Ping every address, read ARP, then work out hubs and layout.
+
+        Returns the ARP table as read, so the ping round of the same update needn't read it again.
+        """
         from icmplib import async_multiping  # noqa: PLC0415
 
         async with self._sweep_lock, self._scanning():
@@ -379,6 +381,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             gateway = self.config_entry.data[CONF_GATEWAY]
             self.set_scan(phase="arp", found=len(replied - {gateway}))
             arp = await self.hass.async_add_executor_job(_read_arp)
+            table = dict(arp)
             # A machine never has an ARP entry for its own address, so add the host Home
             # Assistant runs on from its own network adapters.
             local = await self._local_addresses()
@@ -456,6 +459,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                         EVENT_NEW_DEVICE,
                         {"mac": rec.get("mac"), "ip": rec.get("ip"), "name": self._discovered_name(key, rec)},
                     )
+            return table
 
     async def _local_addresses(self) -> dict[str, str]:
         """{ip: mac} for this machine's own addresses inside the watched subnet.
@@ -865,8 +869,12 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
     # ----- ping ------------------------------------------------------------------
 
-    async def _ping_tracked(self) -> list[tuple[str, str | None]]:
-        """Ping hubs and tracked devices. Returns [(key, ip)] that answered."""
+    async def _ping_tracked(self, arp: dict[str, str] | None = None) -> list[tuple[str, str | None]]:
+        """Ping hubs and tracked devices. Returns [(key, ip)] that answered.
+
+        `arp` is the table a sweep in the same update has just read; without one, ARP is read
+        after the pings.
+        """
         from icmplib import async_multiping  # noqa: PLC0415
 
         targets: dict[str, str] = {}
@@ -888,9 +896,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             list(by_ip), count=PING_COUNT, interval=0.3, timeout=PING_TIMEOUT,
             concurrent_tasks=64, privileged=self._privileged,
         )
-        # The pings just refreshed ARP, so it names the MAC behind each reply. A device whose
-        # old address now belongs to someone else stays offline instead of borrowing their reply.
-        arp = await self.hass.async_add_executor_job(_read_arp)
+        # The pings just refreshed ARP (or the sweep's did, a moment ago), so it names the MAC behind
+        # each reply. A device whose old address now belongs to someone else stays offline instead
+        # of borrowing their reply.
+        if arp is None:
+            arp = await self.hass.async_add_executor_job(_read_arp)
         hub_macs = self._hub_macs()
         macs: dict[str, str] = {}
         for key, ip in targets.items():

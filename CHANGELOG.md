@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **ARP is read once per update.** When an update runs a network scan, the ping round right after it uses the ARP table the scan has just read instead of reading it again (follow-up to #47).
+
 ## 0.3.0
 
 ### Added
