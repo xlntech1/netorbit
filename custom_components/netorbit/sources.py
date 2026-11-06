@@ -19,6 +19,9 @@ class RegistryInfo:
     model: str | None
     manufacturer: str | None
     domain: str | None
+    device_id: str | None = None  # the Home Assistant device entry the name came from
+    device_ids: tuple[str, ...] = ()  # every device entry with this MAC: a plug's own integration and a router's client entry, say
+    user_named: bool = False  # the name was typed by a person in Home Assistant
 
 
 def _entry_ids(dev: dr.DeviceEntry) -> list[str]:
@@ -64,7 +67,8 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
                 domain = entry.domain
         info = RegistryInfo(
             name=useful_name(dev.name_by_user) or useful_name(dev.name),
-            model=dev.model, manufacturer=dev.manufacturer, domain=domain,
+            model=dev.model, manufacturer=dev.manufacturer, domain=domain, device_id=dev.id, device_ids=(dev.id,),
+            user_named=bool(useful_name(dev.name_by_user)),
         )
         for mac in macs:
             old = out.get(mac)
@@ -72,13 +76,25 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
                 out[mac] = info
                 continue
             # The same MAC often shows up under several integrations (a speaker and its
-            # media renderer, say). Prefer network integrations, then a real name.
+            # media renderer, a plug and the router's client entry for it). A name a person typed
+            # wins, then network integrations, then any real name; every device entry is kept,
+            # since any of them may carry the sensors that describe the device.
+            ids = tuple(dict.fromkeys((*old.device_ids, dev.id)))
+            if info.user_named and not old.user_named:
+                name = info.name
+            elif old.user_named and not info.user_named:
+                name = old.name
+            elif domain in NETWORK_DOMAINS and old.domain not in NETWORK_DOMAINS:
+                name = info.name or old.name
+            else:
+                name = old.name or info.name
+            user_named = old.user_named or info.user_named
             if domain in NETWORK_DOMAINS and old.domain not in NETWORK_DOMAINS:
-                out[mac] = RegistryInfo(info.name or old.name, info.model or old.model,
-                                        info.manufacturer or old.manufacturer, domain)
-            elif old.name is None and info.name:
-                out[mac] = RegistryInfo(info.name, old.model or info.model,
-                                        old.manufacturer or info.manufacturer, old.domain)
+                out[mac] = RegistryInfo(name, info.model or old.model, info.manufacturer or old.manufacturer, domain,
+                                        info.device_id or old.device_id, ids, user_named)
+            else:
+                out[mac] = RegistryInfo(name, old.model or info.model, old.manufacturer or info.manufacturer, old.domain,
+                                        old.device_id or info.device_id, ids, user_named)
     return out
 
 

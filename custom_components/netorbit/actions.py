@@ -81,7 +81,8 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
         for node in data.nodes.values():
             if node.kind == INTERNET_KEY:
                 continue
-            extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn)) if v}
+            extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn),
+                                       ("wireless", node.wireless)) if v}
             if node.kind == "hub":
                 hubs.append({
                     "id": node.key.removeprefix("hub:"), "name": node.name, "type": node.hub_type,
@@ -240,7 +241,7 @@ async def dismiss_hub(hass, entry, coord, device: str) -> dict[str, Any]:
 async def update_device(
     hass, entry, coord, device: str, name: str | None = None, icon: str | None = None,
     sleepy: bool | None = None, hub: str | None = None, managed_by: str | None = None,
-    fields: dict[str, Any] | None = None,
+    fields: dict[str, Any] | None = None, entities: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Change what a person set on a device. An empty name or icon goes back to the discovered one."""
     key = coord.resolve_device(device)
@@ -262,6 +263,7 @@ async def update_device(
     if hub:
         manage.assign(opts, [key], _hub(coord, hub))
     manage.set_fields(cfg, managed_by, fields)
+    manage.set_links(cfg, entities)
     if key in opts[CONF_IGNORED]:
         opts[CONF_IGNORED].remove(key)
     await _save(hass, entry, coord, opts)
@@ -274,8 +276,8 @@ EXPORT_VERSION = 1
 def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     """Everything a person has set up, keyed by MAC, so it can be backed up or moved."""
     opts = coord.opts
-    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields")
-    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields")
+    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields", "entities")
+    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields", "entities")
     return {
         "netorbit_export": EXPORT_VERSION,
         "hubs": [

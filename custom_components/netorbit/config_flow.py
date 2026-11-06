@@ -401,6 +401,12 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 [{"value": AUTO_VALUE, "label": "Automatic"}, *self._hub_choices()]
             ),
             vol.Required("sleepy", default=bool(cfg.get("sleepy", False))): bool,
+            vol.Optional("signal_entity", description={"suggested_value": (cfg.get("entities") or {}).get("signal")}): sel.EntitySelector(
+                sel.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional("lqi_entity", description={"suggested_value": (cfg.get("entities") or {}).get("lqi")}): sel.EntitySelector(
+                sel.EntitySelectorConfig(domain="sensor")
+            ),
             **_text_fields(cfg),
         }
 
@@ -472,7 +478,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 new_cfg = self.opts[CONF_DEVICES].setdefault(key, {})
                 new_cfg.update(cleaned)
                 # The form shows everything, so an emptied box means "remove".
-                for field in ("name", "icon", "managed_by", "fields"):
+                for field in ("name", "icon", "managed_by", "fields", "entities"):
                     if not cleaned.get(field):
                         new_cfg.pop(field, None)
                 if user_input.get("hub") in (None, AUTO_VALUE):
@@ -572,6 +578,7 @@ def _clean_device(user_input: dict[str, Any]) -> dict[str, Any]:
         out["icon"] = user_input["icon"]
     managed_by, fields = _text_values(user_input)
     manage.set_fields(out, managed_by, fields)
+    manage.set_links(out, {"signal": user_input.get("signal_entity") or "", "lqi": user_input.get("lqi_entity") or ""})
     return out
 
 

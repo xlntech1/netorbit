@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -558,4 +558,21 @@ test("extra fields parse one Label: value per line", () => {
   assert.throws(() => noParseFields("no separator"), /Label: value/);
   assert.throws(() => noParseFields(": nothing before"), /Label: value/);
   assert.deepStrictEqual(noParseFields(""), {});
+});
+
+test("wireless line, colour and coarse signature", () => {
+  const w = { radio: "wifi", ap_name: "Den AP", ssid: "IoT", band: "5 GHz", channel: 44, signal_dbm: -61, snr: 37, quality: 78, source: "fortigate:Edge" };
+  assert.strictEqual(noWirelessLine(w), "Wi-Fi \u00b7 Den AP \u00b7 IoT \u00b7 5 GHz ch 44 \u00b7 \u221261 dBm \u00b7 SNR 37");
+  assert.strictEqual(noWirelessLine({ radio: "zigbee", lqi: 212, signal_dbm: -58 }), "Zigbee \u00b7 LQI 212 \u00b7 \u221258 dBm");
+  assert.strictEqual(noWirelessLine({ radio: "wifi", quality: 55 }), "Wi-Fi \u00b7 55%");
+  assert.strictEqual(noWirelessLine(null), "");
+  assert.strictEqual(noSignalColor(w), "#34d399");
+  assert.strictEqual(noSignalColor({ signal_dbm: -85 }), "#fbbf24");
+  assert.strictEqual(noSignalColor({ lqi: 30 }), "#f87171");
+  assert.strictEqual(noSignalColor(null), "#94a3b8");
+  assert.strictEqual(noWirelessSig(w), noWirelessSig(Object.assign({}, w, { signal_dbm: -62, quality: 76 })));
+  assert.notStrictEqual(noWirelessSig(w), noWirelessSig(Object.assign({}, w, { channel: 36 })));
+  assert.strictEqual(noSourceLabel("fortigate:Edge"), "Edge");
+  assert.strictEqual(noSourceLabel("entity:sensor.plug_rssi"), "its own sensor");
+  assert.strictEqual(noSourceLabel("linked:sensor.x"), "linked sensor");
 });

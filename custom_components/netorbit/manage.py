@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.util import dt as dt_util
 
+from .wireless.entities import LINK_KINDS
 from .const import (
     CONF_DEVICES,
     CONF_DISMISSED_HUBS,
@@ -81,6 +82,30 @@ def stored_text(cfg: dict[str, Any]) -> dict[str, Any]:
         "managed_by": managed_by if isinstance(managed_by, str) and managed_by else None,
         "fields": {k: v for k, v in fields.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(fields, dict) else {},
     }
+
+
+def set_links(cfg: dict[str, Any], entities: Any) -> None:
+    """Link entities to a node by role ({signal: sensor.x, lqi: sensor.y}); an empty value unlinks a role."""
+    if entities is None:
+        return
+    if not isinstance(entities, dict):
+        raise ManageError("entities must be a mapping of role to entity id, like {signal: sensor.plug_rssi}")
+    current: dict[str, str] = dict(cfg.get("entities") or {})
+    for role, entity_id in entities.items():
+        key = str(role).strip().lower()
+        if key not in LINK_KINDS:
+            raise ManageError(f"Unknown role '{role}'; use one of {', '.join(LINK_KINDS)}")
+        value = str(entity_id).strip() if entity_id else ""
+        if not value:
+            current.pop(key, None)
+            continue
+        if "." not in value or " " in value or value != value.lower():
+            raise ManageError(f"'{value}' is not an entity id")
+        current[key] = value
+    if current:
+        cfg["entities"] = current
+    else:
+        cfg.pop("entities", None)
 
 
 def parse_fields_text(text: str | None) -> dict[str, str]:
@@ -199,6 +224,7 @@ def update_hub(opts: dict[str, Any], hub_id: str, **changes: Any) -> dict[str, A
         hub["parent"] = parent
         hub["parent_locked"] = True
     set_fields(hub, changes.get("managed_by"), changes.get("fields"))
+    set_links(hub, changes.get("entities"))
     return {"hub": hub_id}
 
 

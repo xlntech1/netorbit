@@ -9,6 +9,11 @@ Two kinds, one module per product family:
 
 Both hand back WirelessInfo records (see model.py), and the coordinator places clients under
 their access points from those. Registering a new module here is all it takes to add one.
+
+The same records carry each client's radio details (SSID, band, channel, signal). Home Assistant
+adds its own: device_tracker attributes (tracker.py), the device's own sensors and entities a
+person linked by hand (entities.py). `merge` folds the sources into one WirelessInfo per node,
+least trusted first: trackers, the device's sensors, a controller, linked entities.
 """
 
 from __future__ import annotations

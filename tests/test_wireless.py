@@ -1,6 +1,9 @@
-"""Wi-Fi plug-ins: the shared record, the controller parser and how access point readers are picked."""
+"""Wi-Fi plug-ins and radio details: the shared record, the entity matching, the controller parser and how access
+point readers are picked."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,6 +21,7 @@ from custom_components.netorbit.wireless import (
     quality_from,
     reader_for,
 )
+from custom_components.netorbit.wireless.entities import classify_entity, radio_for
 from custom_components.netorbit.wireless.fortigate import FortiGateController, parse_client
 from custom_components.netorbit.wireless.grandstream import GrandstreamAccessPoint
 
@@ -40,6 +44,42 @@ def test_merge_later_sources_win_field_by_field() -> None:
     assert merge(first, second).as_dict() == {"radio": "wifi", "ap_name": "Hall AP", "ssid": "Home", "band": "5 GHz", "channel": 44,
                                               "signal_dbm": -61, "snr": 37, "quality": 78, "source": "b"}
     assert merge(None, None) is None
+
+
+def test_merge_order_and_quality_reset() -> None:
+    tracker = WirelessInfo(ssid="Home", band="5 GHz", source="tracker:device_tracker.a")
+    own = WirelessInfo(signal_dbm=-70, source="entity:sensor.a_rssi")
+    ctrl = WirelessInfo(ap_name="Hall AP", channel=44, signal_dbm=-61, snr=37, source="fortigate:Edge")
+    merged = merge(tracker, own, ctrl)
+    assert merged.as_dict() == {"radio": "wifi", "ap_name": "Hall AP", "ssid": "Home", "band": "5 GHz", "channel": 44,
+                                "signal_dbm": -61, "snr": 37, "quality": 78, "source": "fortigate:Edge"}
+    # A hand-linked sensor wins, and the quality follows the winning signal.
+    linked = WirelessInfo(signal_dbm=-85, source="linked:sensor.custom")
+    assert merge(ctrl, linked).quality == 30 and merge(ctrl, linked).source == "linked:sensor.custom"
+    assert merge(None, None) is None
+    zig = merge(WirelessInfo(lqi=212, signal_dbm=-58, radio="zigbee", source="entity:sensor.relay_lqi"))
+    assert zig.quality == 83 and zig.radio == "zigbee"
+
+
+def _ent(entity_id, **kw):
+    base = {"translation_key": None, "original_name": None, "unique_id": "u", "original_device_class": None,
+            "device_class": None, "unit_of_measurement": None, "platform": "x"}
+    base.update(kw)
+    return SimpleNamespace(entity_id=entity_id, **base)
+
+
+def test_classify_entities_and_radios() -> None:
+    assert classify_entity(_ent("sensor.relay_lqi")) == "lqi"
+    assert classify_entity(_ent("sensor.relay_rssi")) == "signal"
+    assert classify_entity(_ent("sensor.plug_signal_strength", unit_of_measurement="dBm")) == "signal"
+    assert classify_entity(_ent("sensor.plug_x", original_device_class="signal_strength")) == "signal"
+    assert classify_entity(_ent("sensor.cam_signal", unit_of_measurement="%")) == "quality"
+    assert classify_entity(_ent("sensor.phone_ssid")) == "ssid" and classify_entity(_ent("sensor.phone_bssid")) == "bssid"
+    assert classify_entity(_ent("sensor.esp_wifi_channel")) == "channel"
+    assert classify_entity(_ent("sensor.temperature")) is None
+    assert radio_for("zha", "sensor.relay_lqi") == "zigbee" and radio_for("zwave_js", "x") == "zwave"
+    assert radio_for("matter", "sensor.plug_wi_fi_rssi") == "wifi" and radio_for("matter", "sensor.sensor_rssi") == "thread"
+    assert radio_for("bthome", "x") == "bluetooth" and radio_for("esphome", "x") == "wifi" and radio_for("", "sensor.x") == "wifi"
 
 
 def test_fortigate_parser() -> None:

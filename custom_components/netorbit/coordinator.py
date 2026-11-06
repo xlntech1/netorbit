@@ -92,7 +92,9 @@ from .logic import (
 from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
-from .wireless import AccessPointReader, ControllerError, WirelessInfo, controller_for, reader_for
+from .wireless import AccessPointReader, ControllerError, WirelessInfo, controller_for, merge as merge_wireless, reader_for
+from .wireless.entities import match_entities, read_entities, read_linked
+from .wireless.tracker import tracker_wireless_by_mac
 from .topology import Topology, infer, macs_close
 
 _LOGGER = logging.getLogger(__name__)
@@ -138,6 +140,8 @@ class Node:
     fqdn: str | None = None  # full reverse DNS name, when the network publishes one
     managed_by: str | None = None  # free text: a URL, or the name of the thing on the map that manages it
     fields: dict[str, str] = field(default_factory=dict)  # more free text, label -> value
+    wireless: dict[str, Any] | None = None  # radio details (see wireless/model.py), when any source has them
+    entities: dict[str, str] | None = None  # entities a person linked by role: signal, lqi, ssid, ...
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -217,6 +221,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._controller_ap: dict[str, str] = {}
         self._ap_clients: dict[str, str] = {}  # client MAC -> hub id, from the AP's own SNMP client table
         self._controller_hub: dict[str, str] = {}  # client mac -> hub id, from controllers that only name the AP
+        self._own_entities: dict[str, list[tuple[str, str, str]]] = {}  # mac -> its radio sensors, matched each sweep
+        self._tracker_wireless: dict[str, WirelessInfo] = {}
         self._ctrl_clients: dict[str, WirelessInfo] = {}  # client mac -> what the Wi-Fi controllers say
         self._ctrl_last: dict[str, dict[str, WirelessInfo]] = {}  # per controller, its last good answer
         self._ctrl_backoff: dict[str, datetime] = {}  # controllers that failed: do not ask again before this
@@ -362,6 +368,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         for mac, info in self._ctrl_clients.items():
             if info.ap_mac:
                 self._controller_ap.setdefault(mac, info.ap_mac)
+        self._tracker_wireless = tracker_wireless_by_mac(self.hass)
         self._save()
         self._alive_keys = {k for k, _ in alive}
         data = self._build(now, self._alive_keys)
@@ -448,6 +455,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             await self._lookup_vendors()
             await self._resolve_names(now)
             self._registry = registry_by_mac(self.hass)
+            self._own_entities = {}
+            for mac, info in self._registry.items():
+                matched = [m for device_id in info.device_ids for m in match_entities(self.hass, device_id)]
+                if matched:
+                    self._own_entities[mac] = matched
             self._tracker_names = tracker_names_by_mac(self.hass)
             self._ping_names = ping_names_by_ip(self.hass)
             if self.opts[CONF_SNMP_ENABLED]:
@@ -1102,6 +1114,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 ip_changes=rec.get("ip_changes", 0),
                 vendor=own.get("vendor"),
                 **manage.stored_text(hub),
+                wireless=self._wireless_for(hub.get("mac") or rec.get("mac"), hub), entities=hub.get("entities"),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1130,6 +1143,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 source="manual" if key in devices else "discovered",
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
                 **manage.stored_text(cfg),
+                wireless=self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), entities=cfg.get("entities"),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,
@@ -1233,6 +1247,23 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 elif prev == STATUS_STALE and node.status == STATUS_ONLINE:
                     self.hass.bus.async_fire(EVENT_DEVICE_RECOVERED, payload)
             self._prev_status[key] = node.status
+
+    # ----- wireless --------------------------------------------------------------
+
+    def _wireless_for(self, mac: str | None, cfg: dict[str, Any]) -> dict[str, Any] | None:
+        """One node's radio details, merged from every source that knows it (least trusted first)."""
+        parts: list[WirelessInfo | None] = []
+        if mac:
+            parts.append(self._tracker_wireless.get(mac))
+            matched = self._own_entities.get(mac)
+            if matched:
+                parts.append(read_entities(self.hass, matched))
+            parts.append(self._ctrl_clients.get(mac))
+        links = cfg.get("entities") or {}
+        if links:
+            parts.append(read_linked(self.hass, links))
+        info = merge_wireless(*parts)
+        return info.as_dict() if info else None
 
     # ----- lookups used by services, the options flow and AI tools ------------
 

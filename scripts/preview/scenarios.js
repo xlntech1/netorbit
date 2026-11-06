@@ -125,5 +125,10 @@
     Object.assign(byLabel("NAS").attributes, { fqdn: "nas.home.example", hostname: "nas", managed_by: "Office Switch", first_seen: new Date(Date.now() - 90 * 86400e3).toISOString(),
       fields: { Location: "Office closet", Serial: "NAS-00042", Notes: "Backups run at 02:00; spare disk in the drawer" } });
     Object.assign(byLabel("Printer").attributes, { fqdn: "printer.home.example", hostname: "printer", managed_by: "https://192.0.2.30/", fields: { Toner: "ordered 2026-10" } });
+    // Radio details: a controller knows the AP, band and channel; a plain sensor only the signal.
+    Object.assign(byLabel("Smart Plug").attributes, { wireless: { radio: "wifi", ap_name: "Den AP", ssid: "IoT", band: "2.4 GHz", channel: 6, signal_dbm: -61, snr: 34, quality: 78, source: "fortigate:Edge", at: scanned } });
+    Object.assign(byLabel("Streamer").attributes, { wireless: { radio: "wifi", ssid: "Home", band: "5 GHz", channel: 44, signal_dbm: -72, quality: 56, source: "tracker:device_tracker.streamer", at: scanned } });
+    Object.assign(byLabel("Doorbell").attributes, { wireless: { radio: "wifi", signal_dbm: -91, quality: 18, source: "entity:sensor.doorbell_rssi", at: scanned } });
+    Object.assign(byLabel("Thermostat 1F").attributes, { wireless: { radio: "thread", lqi: 196, signal_dbm: -64, quality: 77, source: "entity:sensor.thermostat_rssi", at: scanned }, linked_entities: { signal: "sensor.thermostat_rssi" } });
   })();
 })();

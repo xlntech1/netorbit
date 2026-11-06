@@ -11,6 +11,7 @@ NetOrbit draws a map the moment you add it. How much of it is right on its own d
 | UniFi | Add Home Assistant's UniFi Network integration | Every wireless client placed under its access point, with names |
 | Managed switches | Turn on SNMP (below) | Every device placed under the switch, and the access point, it really connects through |
 | Netgear or Orbi | Add the Netgear integration and turn on its "connected AP" sensors | Clients placed under the right satellite |
+| A Wi-Fi controller with an API (FortiGate with FortiAPs so far) | Add it as a Wi-Fi controller (below) | Every wireless client placed under its access point, with signal, band and channel |
 | eero, Google/Nest Wifi, Deco, Velop, an ISP router | Nothing to turn on, these don't share it | Use the quick manual steps at the bottom |
 
 You can mix these. Anything you place by hand always wins over automatic placement.
@@ -25,7 +26,7 @@ If Home Assistant already has an integration for your router or Wi-Fi system, Ne
 
 ### A Wi-Fi controller NetOrbit reads itself
 
-If your Wi-Fi system has an API but no Home Assistant integration that says which access point each client uses, NetOrbit can ask the controller directly. Add it under **Configure > Add a Wi-Fi controller**: NetOrbit asks it every ping round which client is on which access point and places those clients under their access points (the placement shows as *controller*). It only reads.
+If your Wi-Fi system has an API but no Home Assistant integration that says which access point each client uses, NetOrbit can ask the controller directly. Add it under **Configure > Add a Wi-Fi controller**: NetOrbit asks it every ping round which client is on which access point and places those clients under their access points (the placement shows as *controller*), with the signal, band and channel shown on the map and in the details popup. It only reads.
 
 **FortiGate (FortiAP wireless controller)**
 

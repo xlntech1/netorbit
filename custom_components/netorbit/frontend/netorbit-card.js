@@ -100,6 +100,48 @@ function noParseFields(text) {
   return out;
 }
 
+const NO_RADIO = { wifi: "Wi-Fi", zigbee: "Zigbee", zwave: "Z-Wave", thread: "Thread", bluetooth: "Bluetooth", other: "Radio" };
+
+// One line about a node's radio link: "Wi-Fi · Den AP · IoT · 5 GHz ch 44 · −61 dBm · SNR 37", or "Zigbee · LQI 212 · −58 dBm".
+function noWirelessLine(w) {
+  if (!w) return "";
+  const parts = [NO_RADIO[w.radio] || NO_RADIO.other];
+  if (w.ap_name) parts.push(w.ap_name);
+  if (w.ssid) parts.push(w.ssid);
+  if (w.band || w.channel) parts.push([w.band, w.channel ? `ch ${w.channel}` : ""].filter(Boolean).join(" "));
+  if (w.lqi != null) parts.push(`LQI ${w.lqi}`);
+  if (w.signal_dbm != null) parts.push(`${Math.round(w.signal_dbm)} dBm`.replace("-", "\u2212"));
+  if (w.snr != null) parts.push(`SNR ${Math.round(w.snr)}`);
+  if (w.signal_dbm == null && w.lqi == null && w.quality != null) parts.push(`${w.quality}%`);
+  return parts.join(" \u00b7 ");
+}
+
+// Green, amber or red for a signal, with the thresholds people already use on their dashboards:
+// LQI 80 / 40, dBm −80 / −90, else quality 40 / 20.
+function noSignalColor(w) {
+  if (!w) return "#94a3b8";
+  if (w.lqi != null) return w.lqi >= 80 ? "#34d399" : w.lqi >= 40 ? "#fbbf24" : "#f87171";
+  if (w.signal_dbm != null) return w.signal_dbm >= -80 ? "#34d399" : w.signal_dbm >= -90 ? "#fbbf24" : "#f87171";
+  if (w.quality != null) return w.quality >= 40 ? "#34d399" : w.quality >= 20 ? "#fbbf24" : "#f87171";
+  return "#94a3b8";
+}
+
+// The coarse part of the radio details: a redraw per dBm would make the map twitch every ping round.
+function noWirelessSig(w) {
+  if (!w) return "";
+  return [w.radio, w.ap_name, w.ssid, w.band, w.channel, w.quality == null ? "" : Math.round(w.quality / 10)].join("/");
+}
+
+// Who gave the signal: "fortigate:Edge" -> "Edge", "entity:sensor.x" -> "its own sensor", trackers and links by kind.
+function noSourceLabel(src) {
+  const [kind, rest] = String(src || "").split(/:(.*)/s);
+  if (!kind) return "";
+  if (kind === "entity") return "its own sensor";
+  if (kind === "tracker") return "device tracker";
+  if (kind === "linked") return "linked sensor";
+  return rest || kind;
+}
+
 /** Pure layout: returns positions for hubs and leaves. Exported for tests. */
 function netorbitLayout(model, opts) {
   const o = Object.assign({ cx: 500, cy: 500, rDev: 370, rHub1: 135, hubStep: 125, rHubMax: 290, rGroup: 245 }, opts || {});
@@ -1030,6 +1072,7 @@ class NetOrbitCard extends HTMLElement {
         kind: a.kind, link: a.link, parent: a.link, sleepy: a.sleepy === true, last_seen: a.last_seen,
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {}, first_seen: a.first_seen,
+        wireless: a.wireless || null, entities: a.linked_entities || null,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
       // A device just dropped on a hub is drawn there right away, with a "saving" ring, until
@@ -1040,7 +1083,7 @@ class NetOrbitCard extends HTMLElement {
         else { n.link = n.parent = opt.link; n.placement = "manual"; n.pending = true; }
       }
       // Free text is only shown in the details popup, but it is part of the signature so a saved edit redraws.
-      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields)].join("~"));
+      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields), noWirelessSig(n.wireless)].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -1233,6 +1276,8 @@ class NetOrbitCard extends HTMLElement {
   .pop a:hover { text-decoration:underline; }
   .pop textarea { width:100%; box-sizing:border-box; margin-top:4px; font:inherit; font-size:12.5px; padding:6px 8px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#0b1220; color:#e2e8f0; resize:vertical; }
   .pop .err { color:#fecaca; font-size:12px; margin-top:6px; min-height:0; }
+  .pop .qbar { display:inline-block; width:56px; height:5px; border-radius:3px; background:rgba(148,163,184,.2); vertical-align:middle; margin-left:6px; overflow:hidden; }
+  .pop .qbar i { display:block; height:100%; }
   .mlist { max-height:240px; overflow:auto; margin-top:8px; }
   .mrow { display:flex; align-items:center; gap:8px; padding:4px 2px; cursor:pointer; border-radius:6px; }
   .mrow:hover { background:rgba(148,163,184,.1); }
@@ -1995,6 +2040,7 @@ class NetOrbitCard extends HTMLElement {
       (n.vendor ? `<div><span class="k">Maker</span>${noEsc(n.vendor)}</div>` : "") +
       ((n.fqdn || n.hostname) && (n.fqdn || n.hostname) !== n.label ? `<div><span class="k">DNS name</span>${noEsc(n.fqdn || n.hostname)}</div>` : "") +
       (via ? `<div><span class="k">Via</span>${noEsc(via)}</div>` : "") +
+      (n.wireless ? `<div><span class="k">Signal</span><span style="color:${noSignalColor(n.wireless)}">${noEsc(noWirelessLine(n.wireless))}</span></div>` : "") +
       (n.managed_by ? `<div><span class="k">Managed by</span>${noEsc(noTrunc(n.managed_by, 40))}</div>` : "") +
       (n.kind === "device" && n.placement ? `<div><span class="k">Placed</span>${noEsc(NO_PLACEMENT[n.placement] || n.placement)}</div>` : "") +
       `<div><span class="k">Last seen</span>${n.status === "online" ? "now" : noRel(n.last_seen)}</div>` +
@@ -2332,10 +2378,12 @@ class NetOrbitCard extends HTMLElement {
       noEsc(n.managed_by);
     const fields = Object.entries(n.fields || {}).map(([k, v]) => row(k, noEsc(v))).join("");
     const what = n.kind === "hub" ? (NO_HUB_TYPE[n.hub_type] || "Hub") : "Device";
+    const w = n.wireless;
+    const signalHtml = w ? `<span style="color:${noSignalColor(w)}">${noEsc(noWirelessLine(w))}</span>${w.quality != null ? `<span class="qbar"><i style="width:${w.quality}%;background:${noSignalColor(w)}"></i></span>` : ""}${w.source ? ` <span class="muted">from ${noEsc(noSourceLabel(w.source))}</span>` : ""}` : "";
     const html =
       `<b>${noEsc(n.label)}</b><div class="muted">${noEsc(what)} · <span style="color:${col(n.status)}">${(NO_STATUS[n.status] || NO_STATUS.unknown).label}</span>${n.sleepy ? " · allowed to sleep" : ""}</div>` +
       `<div class="kv">${row("DNS name", dns && dns !== n.label ? noEsc(dns) : "")}${row("IP", noEsc(n.ip))}${row("MAC", noEsc(n.mac))}${row("Maker", noEsc(n.vendor))}</div>` +
-      `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
+      `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${row("Signal", signalHtml)}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
       (managed || fields ? `<div class="sec">Fields</div><div class="kv">${row("Managed by", managed)}${fields}</div>` : "") +
       `<div class="sec">History</div><div class="kv">${row("First seen", n.first_seen ? noEsc(noRel(n.first_seen)) : "")}${row("Last seen", n.status === "online" ? "now" : noEsc(noRel(n.last_seen)))}${n.ip_changes ? row("IP changes", String(n.ip_changes)) : ""}</div>` +
       `<div class="row">${admin ? `<button class="go ed">Edit</button>` : ""}${n.entity ? `<button class="info">More info</button>` : ""}<button class="x">Close</button></div>`;
@@ -2391,11 +2439,23 @@ class NetOrbitCard extends HTMLElement {
 
   _detailsEdit(n, ev, wrap, place, hubs, all, col) {
     const text = Object.entries(n.fields || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    const links = n.entities || {};
+    // Sensors a person may want to link: anything in Home Assistant whose id or unit talks about a signal.
+    const sensorOptions = (re, current) => {
+      const states = (this._hass && this._hass.states) || {};
+      const ids = Object.keys(states).filter((id) => id.startsWith("sensor.") && (re.test(id) || states[id].attributes.unit_of_measurement === "dBm" || states[id].attributes.device_class === "signal_strength")).sort();
+      if (current && !ids.includes(current)) ids.unshift(current);
+      return `<option value="">none</option>` + ids.map((id) => `<option value="${noEsc(id)}" ${id === current ? "selected" : ""}>${noEsc((states[id] && states[id].attributes.friendly_name) || id)} (${noEsc(id)})</option>`).join("");
+    };
     const pop = this._openPop(
       `<b>Edit ${noEsc(n.label)}</b>` +
       `<label>Name<input class="name" ${n.kind === "device" ? `maxlength="${NO_NAME_MAX}" placeholder="Automatic name" ` : ""}value="${noEsc(n.label)}"></label>` +
       `<label>Managed by<input class="mb" value="${noEsc(n.managed_by || "")}" placeholder="A link, or the name of a hub or device on the map"></label>` +
       `<label>Extra fields, one per line as Label: value<textarea class="fx" rows="4" placeholder="Location: Garage&#10;Serial: ABC123">${noEsc(text)}</textarea></label>` +
+      `<div class="sec">Signal</div>` +
+      `<label>Signal sensor<select class="lse">${sensorOptions(/rssi|signal|dbm|wifi|wi_fi/i, links.signal)}</select></label>` +
+      `<label>Link quality (LQI) sensor<select class="lle">${sensorOptions(/lqi|link_quality|linkquality/i, links.lqi)}</select></label>` +
+      `<div class="muted small">Only when NetOrbit does not find the device's own sensors, or picks the wrong one.</div>` +
       `<div class="err"></div>` +
       `<div class="row"><button class="go save">Save</button><button class="back">Back</button><button class="x">Close</button></div>`,
       ev, wrap, place, 320, 360
@@ -2414,6 +2474,8 @@ class NetOrbitCard extends HTMLElement {
       const data = { managed_by: q(".mb").value.trim(), fields: Object.assign(Object.fromEntries(Object.keys(n.fields || {}).map((k) => [k, null])), fields) };
       const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
       const renamed = name !== String(n.label || "").trim().slice(0, NO_NAME_MAX);
+      const picks = { signal: q(".lse").value, lqi: q(".lle").value };
+      if (picks.signal !== (links.signal || "") || picks.lqi !== (links.lqi || "")) data.entities = picks;
       if (n.kind === "hub") {
         data.hub = n.key.replace(/^hub:/, "");
         if (name && name !== n.label) data.name = name;
@@ -2454,5 +2516,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

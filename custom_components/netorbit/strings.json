@@ -125,11 +125,15 @@
           "hub": "Connected through (Automatic lets NetOrbit decide)",
           "sleepy": "Allowed to sleep (never fires a stale event)",
           "managed_by": "Managed by (optional)",
-          "fields_text": "Extra fields (optional)"
+          "fields_text": "Extra fields (optional)",
+          "signal_entity": "Signal sensor (optional)",
+          "lqi_entity": "Link quality (LQI) sensor (optional)"
         },
         "data_description": {
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
-          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
+          "signal_entity": "Only when NetOrbit does not find this device's own signal sensor, or picks the wrong one: the companion app's Wi-Fi sensors on a phone, say.",
+          "lqi_entity": "A Zigbee link quality sensor (0-255) to show for this device."
         }
       },
       "edit_device": {
@@ -148,11 +152,15 @@
           "sleepy": "Allowed to sleep (never fires a stale event)",
           "stop_tracking": "Stop tracking and ignore this device",
           "managed_by": "Managed by (optional)",
-          "fields_text": "Extra fields (optional)"
+          "fields_text": "Extra fields (optional)",
+          "signal_entity": "Signal sensor (optional)",
+          "lqi_entity": "Link quality (LQI) sensor (optional)"
         },
         "data_description": {
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
-          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
+          "signal_entity": "Only when NetOrbit does not find this device's own signal sensor, or picks the wrong one: the companion app's Wi-Fi sensors on a phone, say.",
+          "lqi_entity": "A Zigbee link quality sensor (0-255) to show for this device."
         }
       },
       "review_new": {
@@ -181,7 +189,7 @@
       },
       "add_controller": {
         "title": "Add a Wi-Fi controller",
-        "description": "A Wi-Fi controller tells NetOrbit which access point each wireless device uses, and NetOrbit places those devices under their access points. NetOrbit only reads from it.",
+        "description": "A Wi-Fi controller tells NetOrbit which access point each wireless device uses, with its signal, band and channel, and NetOrbit places those devices under their access points. NetOrbit only reads from it.",
         "data": {
           "kind": "Type"
         },
@@ -256,6 +264,11 @@
         "access_point": "Access point",
         "mesh_node": "Mesh node",
         "other": "Other"
+      }
+    },
+    "controller_kind": {
+      "options": {
+        "fortigate": "FortiGate (FortiAP wireless controller)"
       }
     },
     "controller_kind": {
@@ -518,6 +531,10 @@
         "fields": {
           "name": "Extra fields",
           "description": "Label to value pairs to add or change. An empty value removes that label."
+        },
+        "entities": {
+          "name": "Linked sensors",
+          "description": "Sensors to read radio details from, by role: signal, lqi, quality, ssid, bssid, channel. An empty value unlinks a role."
         }
       }
     },
@@ -584,6 +601,10 @@
         "config_entry_id": {
           "name": "Config entry",
           "description": "Only needed if you have more than one NetOrbit entry."
+        },
+        "entities": {
+          "name": "Linked sensors",
+          "description": "Sensors to read radio details from, by role: signal, lqi, quality, ssid, bssid, channel. An empty value unlinks a role."
         }
       }
     }

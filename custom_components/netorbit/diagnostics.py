@@ -40,6 +40,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
                     "has_fqdn": bool(node.fqdn),
                     "has_managed_by": bool(node.managed_by),
                     "field_count": len(node.fields),
+                    "has_wireless": node.wireless is not None,
+                    "wireless_radio": (node.wireless or {}).get("radio"),
+                    "wireless_source": ((node.wireless or {}).get("source") or "").split(":")[0] or None,
+                    "linked_entities": len(node.entities or {}),
                 }
             )
     return {

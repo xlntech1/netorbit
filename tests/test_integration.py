@@ -669,3 +669,121 @@ async def test_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert all("Rack" not in str(n) and "Core switch" not in str(n) for n in diag["nodes"])
     assert any(n["field_count"] == 2 and n["has_managed_by"] for n in diag["nodes"])
+
+
+async def test_wireless_from_entities_trackers_and_links(hass: HomeAssistant, fake_net) -> None:
+    """Radio details come from the device's own sensors, from tracker attributes, and from linked sensors."""
+    from homeassistant.helpers import device_registry as dr, entity_registry as er  # noqa: PLC0415
+
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {"192.0.2.11": MAC_B, "192.0.2.12": MAC_C}
+    # A Zigbee relay whose Home Assistant device carries the LAN MAC (a Wi-Fi/Zigbee bridge) with LQI and RSSI sensors.
+    other = MockConfigEntry(domain="zha", title="ZHA")
+    other.add_to_hass(hass)
+    dev_reg, ent_reg = dr.async_get(hass), er.async_get(hass)
+    # The router's integration lists the same MAC as a client first, with a name but no sensors: the
+    # sensors on the second device entry must still be found.
+    router = MockConfigEntry(domain="unifi", title="UniFi")
+    router.add_to_hass(hass)
+    dev_reg.async_get_or_create(config_entry_id=router.entry_id, connections={(dr.CONNECTION_NETWORK_MAC, MAC_B)}, name="Relay")
+    dev = dev_reg.async_get_or_create(config_entry_id=other.entry_id, identifiers={("zha", "relay")}, connections={(dr.CONNECTION_NETWORK_MAC, MAC_B)}, name="Relay (ZHA)")
+    dev_reg.async_update_device(dev.id, name_by_user="Relay")  # a name a person typed wins over the router's automatic one
+    ent_reg.async_get_or_create("sensor", "zha", "relay-lqi", device_id=dev.id, suggested_object_id="relay_lqi", original_name="LQI")
+    ent_reg.async_get_or_create("sensor", "zha", "relay-rssi", device_id=dev.id, suggested_object_id="relay_rssi",
+                                original_device_class="signal_strength", unit_of_measurement="dBm")
+    hass.states.async_set("sensor.relay_lqi", "212")
+    hass.states.async_set("sensor.relay_rssi", "-58", {"unit_of_measurement": "dBm", "device_class": "signal_strength"})
+    # A phone the UniFi-style tracker knows: SSID, band and AP, no signal.
+    hass.states.async_set("device_tracker.phone", "home", {"mac": MAC_C, "friendly_name": "Phone", "essid": "Home", "radio": "na", "ap_mac": "00:00:5e:00:53:a1"})
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    nodes = _node_states(hass)
+    relay = nodes["Relay"].attributes["wireless"]
+    assert relay["radio"] == "zigbee" and relay["lqi"] == 212 and relay["signal_dbm"] == -58 and relay["quality"] == 83
+    assert relay["source"] == "entity:sensor.relay_rssi" and relay["at"]
+    phone = nodes["Phone"].attributes["wireless"]
+    assert phone["radio"] == "wifi" and phone["ssid"] == "Home" and phone["band"] == "5 GHz" and phone["ap_mac"] == "00:00:5e:00:53:a1"
+    assert "signal_dbm" not in phone and phone["source"] == "tracker:device_tracker.phone"
+    assert nodes["Router"].attributes["wireless"] is None
+
+    # A sensor linked by hand wins over the automatic match, and the sensor's new value shows on the next round.
+    hass.states.async_set("sensor.custom_rssi", "-85", {"unit_of_measurement": "dBm"})
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "entities": {"signal": "sensor.custom_rssi"}}, blocking=True)
+    await hass.async_block_till_done()
+    relay = _node_states(hass)["Relay"]
+    assert relay.attributes["linked_entities"] == {"signal": "sensor.custom_rssi"}
+    assert relay.attributes["wireless"]["signal_dbm"] == -85 and relay.attributes["wireless"]["source"] == "linked:sensor.custom_rssi"
+    assert relay.attributes["wireless"]["lqi"] == 212  # the relay's own LQI still shows
+    with pytest.raises(Exception, match="role"):
+        await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "entities": {"colour": "sensor.x"}}, blocking=True)
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "entities": {"signal": ""}}, blocking=True)
+    await hass.async_block_till_done()
+    relay = _node_states(hass)["Relay"]
+    assert relay.attributes["linked_entities"] is None and relay.attributes["wireless"]["signal_dbm"] == -58
+
+    # Exports carry the links; the options flow sets them with entity pickers.
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "entities": {"lqi": "sensor.relay_lqi"}}, blocking=True)
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    assert exported["devices"][MAC_B]["entities"] == {"lqi": "sensor.relay_lqi"}
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "edit_device"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"device": MAC_B})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"hub": "gateway", "sleepy": False, "signal_entity": "sensor.custom_rssi"})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Relay"].attributes["linked_entities"] == {"signal": "sensor.custom_rssi"}  # the form shows everything: lqi was cleared
+
+
+async def test_wifi_controller_signal_and_placement(hass: HomeAssistant, fake_net, aioclient_mock) -> None:
+    """A FortiGate controller gives signal details and places clients under the access point it names."""
+    import json  # noqa: PLC0415
+
+    fake_net.alive = {GATEWAY, "192.0.2.6", "192.0.2.10"}
+    fake_net.arp = {"192.0.2.6": "00:00:5e:00:53:a1", "192.0.2.10": MAC_B}
+    aioclient_mock.get("https://192.0.2.1/api/v2/monitor/wifi/client", json={"results": [
+        {"mac": MAC_B.upper(), "ip": "192.0.2.10", "wtp_id": "FP231F", "wtp_name": "Hall AP", "ssid": "IoT",
+         "signal": -61, "snr": 37, "channel": 44, "radio_type": "802.11ax-5G"},
+    ]})
+    aioclient_mock.get("https://192.0.2.1/api/v2/monitor/wifi/managed_ap", json={"results": [{"serial": "FP231F", "name": "Hall AP", "board_mac": "00:00:5e:00:53:a1"}]})
+    hubs = [{"id": "gateway", "name": "Router", "type": "router", "parent": None},
+            {"id": "hall_ap", "name": "Hall AP", "type": "access_point", "parent": "gateway", "host": "192.0.2.6"}]
+    entry = _entry("auto", hubs=hubs, wifi_controllers=[{"id": "c1", "kind": "fortigate", "name": "Edge", "host": "192.0.2.1", "port": 443, "verify_ssl": False, "token": "secret-token"}])
+    await _setup(hass, entry)
+    dev = _node_states(hass)["Device 53:0B"]
+    w = dev.attributes["wireless"]
+    assert w["source"] == "fortigate:Edge" and w["ap_name"] == "Hall AP" and w["ap_mac"] == "00:00:5e:00:53:a1"
+    assert w["ssid"] == "IoT" and w["band"] == "5 GHz" and w["channel"] == 44 and w["signal_dbm"] == -61 and w["snr"] == 37
+    assert dev.attributes["link"] == "hub:hall_ap" and dev.attributes["placement"] == "controller"
+    assert "controller" in _summary(hass).attributes["sources"]
+    assert aioclient_mock.mock_calls[0][3]["Authorization"] == "Bearer secret-token"
+
+    # The token and address never reach diagnostics.
+    from custom_components.netorbit.diagnostics import async_get_config_entry_diagnostics  # noqa: PLC0415
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["settings"]["wifi_controllers"] == [{"kind": "fortigate", "has_credentials": True}]
+    assert "secret-token" not in json.dumps(diag) and "192.0.2.1" not in json.dumps(diag["settings"])
+    assert any(n["has_wireless"] and n["wireless_source"] == "fortigate" for n in diag["nodes"])
+
+    # Adding a controller through the options flow tests it first: a refused token is an error, a good one is saved.
+    aioclient_mock.get("https://192.0.2.2/api/v2/monitor/wifi/client", status=401)
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "add_controller"})
+    assert flow["step_id"] == "add_controller"
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"kind": "fortigate"})
+    assert flow["step_id"] == "controller_details"
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": "Second", "host": "192.0.2.2", "port": 443, "verify_ssl": False, "token": "bad"})
+    assert flow["type"] is FlowResultType.FORM and flow["errors"] == {"base": "invalid_auth"}
+    aioclient_mock.clear_requests()
+    aioclient_mock.get("https://192.0.2.2/api/v2/monitor/wifi/client", json={"results": []})
+    aioclient_mock.get("https://192.0.2.2/api/v2/monitor/wifi/managed_ap", json={"results": []})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": "Second", "host": "192.0.2.2", "port": 443, "verify_ssl": False, "token": "good"})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    assert [c["name"] for c in entry.options["wifi_controllers"]] == ["Edge", "Second"]
+    assert entry.options["wifi_controllers"][1]["token"] == "good" and entry.options["wifi_controllers"][1]["id"].startswith("fortigate_")
+    # Removing it through the edit step.
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "edit_controller"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"controller": entry.options["wifi_controllers"][1]["id"]})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"name": "Second", "host": "192.0.2.2", "port": 443, "verify_ssl": False, "remove": True})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY and [c["name"] for c in entry.options["wifi_controllers"]] == ["Edge"]

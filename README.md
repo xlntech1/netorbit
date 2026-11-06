@@ -177,9 +177,9 @@ Under the integration's **Configure** menu:
 | Review suggested hubs | Confirm or dismiss everything NetOrbit thinks might be network gear. |
 | Paste a client list | Paste a client list from an access point, app or switch, pick the hub, and every device in it is placed there. |
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
-| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, stop tracking. |
+| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, linked signal sensors, stop tracking. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
-| Add / edit a Wi-Fi controller | The system that manages your access points, asked (read-only) which access point each wireless device uses. The connection is tested before it is saved. |
+| Add / edit a Wi-Fi controller | The system that manages your access points, asked (read-only) which access point each wireless device uses, with its signal, band and channel. The connection is tested before it is saved. |
 | Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off and SNMP community. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
@@ -188,6 +188,8 @@ Under the integration's **Configure** menu:
 
 **Prefer DNS and Bonjour names** (off by default) puts the name your network gives a device first, before what other integrations call it, and uses it for hubs NetOrbit named itself, such as *Router*. Anything you renamed yourself keeps your name.
 
+
+**Wireless signal.** When anything in Home Assistant knows about a device's radio, the details popup and the hover tooltip show it: Wi-Fi access point, SSID, band and channel, signal in dBm, SNR, Zigbee or Thread link quality, with a colour and a small bar (green from −80 dBm or LQI 80, amber from −90 dBm or LQI 40). Four sources, merged per device: the device's own sensors in Home Assistant (a ZHA relay's LQI and RSSI, a TP-Link plug's signal strength, a Matter device's Wi-Fi RSSI, ESPHome's `wifi_signal`: matched automatically through the MAC address, nothing to set up), what a device_tracker reports (UniFi gives SSID, band and access point), a Wi-Fi controller you add under **Configure**, and sensors you link by hand under *Edit* when the automatic match is missing or wrong (the companion app's Wi-Fi sensors on a phone, say). The `wireless` attribute carries it all for automations.
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
 
 **Hubs with no IP**, such as an unmanaged switch or an access point in bridge mode, can't be pinged, so they take their status from what's behind them: green if anything behind them is online, yellow if something was seen recently, red only when nothing behind them has been seen for the "not seen" window, and grey when nothing is behind them yet or when the only devices behind them are sleeping and off.
@@ -240,13 +242,13 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 | `show_share` | `true` | Show the Share button (image or video of the map, with names hidden by default and no addresses). |
 
-Hover a device for a summary. Tap a hub or device for its details: DNS name, addresses, maker, the hub it connects through and how it was placed, *Managed by* and extra fields, first and last seen. *More info* there opens Home Assistant's own dialog. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get **Edit** in the popup and an **Edit layout** button on the card. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
+Hover a device for a summary. Tap a hub or device for its details: DNS name, addresses, maker, the hub it connects through and how it was placed, *Managed by* and extra fields, the wireless signal when known, first and last seen. *More info* there opens Home Assistant's own dialog. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get **Edit** in the popup and an **Edit layout** button on the card. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Entities, events and services
 
-- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname`, `fqdn` (the full DNS name), `sleepy`, `managed_by` and `fields`.
+- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname`, `fqdn` (the full DNS name), `sleepy`, `managed_by`, `fields`, `wireless` (radio, access point, SSID, band, channel, signal, SNR, LQI, quality, source) when any source knows the device's radio link, and `linked_entities` for sensors you linked.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
@@ -266,12 +268,12 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.reset_placement` | `device` |
 | `netorbit.import_client_list` | `hub`, `text`, `add_missing` |
 | `netorbit.add_hub` | `name` or `device`, `type`, `parent`, `ip`, `mac` |
-| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields` |
+| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields`, `entities` |
 | `netorbit.remove_hub` | `hub` |
 | `netorbit.confirm_hub` | `device`, `type`, `name` |
 | `netorbit.dismiss_hub` | `device` |
 | `netorbit.track_device` | `mac` or `ip`, `name`, `icon`, `hub`, `sleepy` |
-| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label) |
+| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label), `entities` (`{signal: sensor.x, lqi: sensor.y}`, roles signal, lqi, quality, ssid, bssid, channel) |
 | `netorbit.export_config` | none (returns your settings, keyed by MAC) |
 | `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
