@@ -44,6 +44,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
                     "wireless_radio": (node.wireless or {}).get("radio"),
                     "wireless_source": ((node.wireless or {}).get("source") or "").split(":")[0] or None,
                     "linked_entities": len(node.entities or {}),
+                    "notify": node.notify,
                 }
             )
     return {

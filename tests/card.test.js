@@ -609,3 +609,4 @@ test("under a hub, wired devices come by name and wireless ones strongest first"
   devices.find((d) => d.key === "mid").wireless.quality = 55;
   assert.deepStrictEqual(netorbitLayout({ hubs, devices, root: "r" }).slots.filter((s) => s.type === "dev").map((s) => s.d.key), order);
 });
+

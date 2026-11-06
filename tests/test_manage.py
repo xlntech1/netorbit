@@ -76,3 +76,15 @@ def test_hub_names_made_up_or_chosen():
     # Free text on hubs goes through the same rules.
     manage.update_hub(opts, chosen["hub"], managed_by="Router", fields={"Rack": "2"})
     assert by_id[chosen["hub"]]["managed_by"] == "Router" and by_id[chosen["hub"]]["fields"] == {"Rack": "2"}
+
+
+def test_set_notify() -> None:
+    from custom_components.netorbit.manage import set_notify
+
+    cfg: dict = {}
+    set_notify(cfg, True)
+    assert cfg == {"notify": True}
+    set_notify(cfg, None)
+    assert cfg == {"notify": True}
+    set_notify(cfg, False)
+    assert cfg == {}

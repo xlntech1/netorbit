@@ -64,6 +64,7 @@
       if (!st) return;
       if (data.name) st.attributes.label = data.name;
       if ("managed_by" in data) st.attributes.managed_by = data.managed_by || null;
+      if ("notify" in data) st.attributes.notify = !!data.notify;
       if (data.entities) { const l = Object.assign({}, st.attributes.linked_entities || {}); Object.entries(data.entities).forEach(([k, v]) => { if (v) l[k] = v; else delete l[k]; }); st.attributes.linked_entities = Object.keys(l).length ? l : null; }
       if (data.fields) {
         const f = Object.assign({}, st.attributes.fields || {});

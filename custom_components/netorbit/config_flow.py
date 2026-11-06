@@ -24,6 +24,7 @@ from .const import (
     CONF_IGNORE_RANDOM_MAC,
     CONF_IGNORED,
     CONF_MODE,
+    CONF_OFFLINE_AFTER,
     CONF_PING_INTERVAL,
     CONF_PREFER_DNS,
     CONF_WEAK_AFTER,
@@ -225,6 +226,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
                     CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
                     CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
+                    CONF_OFFLINE_AFTER: int(user_input[CONF_OFFLINE_AFTER]),
                 }
             )
             return self._save()
@@ -240,6 +242,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_GROUP_BY_TYPE, default=o[CONF_GROUP_BY_TYPE]): bool,
                 vol.Required(CONF_CHECK_INTERNET, default=o[CONF_CHECK_INTERNET]): bool,
                 vol.Required(CONF_PREFER_DNS, default=o[CONF_PREFER_DNS]): bool,
+                vol.Required(CONF_OFFLINE_AFTER, default=o[CONF_OFFLINE_AFTER]): _int_box(1, 60, "rounds"),
                 vol.Required(CONF_WEAK_AFTER, default=o[CONF_WEAK_AFTER]): _int_box(0, 1440, "min"),
                 vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
@@ -344,7 +347,9 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     errors["host"] = "hub_exists"
                 else:
                     try:
-                        manage.set_fields(manage.hub_by_id(self.opts, result["hub"]), *_text_values(user_input))
+                        hub = manage.hub_by_id(self.opts, result["hub"])
+                        manage.set_fields(hub, *_text_values(user_input))
+                        manage.set_notify(hub, bool(user_input.get("notify")))
                     except manage.ManageError:
                         self.opts[CONF_HUBS] = [h for h in self.opts[CONF_HUBS] if h["id"] != result["hub"]]
                         errors["fields_text"] = "bad_fields"
@@ -381,7 +386,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     managed_by, new_fields = _text_values(user_input)
                     # The form shows every field, so what comes back is the whole list: drop the rest.
                     fields["fields"] = {**{k: None for k in hub.get("fields") or {}}, **new_fields}
-                    manage.update_hub(self.opts, hub["id"], managed_by=managed_by, **fields)
+                    manage.update_hub(self.opts, hub["id"], managed_by=managed_by, notify=bool(user_input.get("notify")), **fields)
                 except manage.ManageError:
                     errors["fields_text"] = "bad_fields"
                 else:
@@ -481,7 +486,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 new_cfg = self.opts[CONF_DEVICES].setdefault(key, {})
                 new_cfg.update(cleaned)
                 # The form shows everything, so an emptied box means "remove".
-                for field in ("name", "icon", "managed_by", "fields", "entities"):
+                for field in ("name", "icon", "managed_by", "fields", "entities", "notify"):
                     if not cleaned.get(field):
                         new_cfg.pop(field, None)
                 if user_input.get("hub") in (None, AUTO_VALUE):
@@ -581,6 +586,7 @@ def _clean_device(user_input: dict[str, Any]) -> dict[str, Any]:
         out["icon"] = user_input["icon"]
     managed_by, fields = _text_values(user_input)
     manage.set_fields(out, managed_by, fields)
+    manage.set_notify(out, bool(user_input.get("notify")))
     manage.set_links(out, {"signal": user_input.get("signal_entity") or "", "lqi": user_input.get("lqi_entity") or ""})
     return out
 
@@ -592,6 +598,7 @@ def _text_fields(cfg: dict[str, Any]) -> dict[Any, Any]:
         vol.Optional("fields_text", description={"suggested_value": manage.fields_to_text(cfg.get("fields")) or None}): sel.TextSelector(
             sel.TextSelectorConfig(multiline=True)
         ),
+        vol.Required("notify", default=bool(cfg.get("notify"))): bool,
     }
 
 

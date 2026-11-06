@@ -121,6 +121,7 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "fields": dict(node.fields),
             "wireless": node.wireless,
             "linked_entities": node.entities,
+            "notify": node.notify,
         }
 
     @callback

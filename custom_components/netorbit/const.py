@@ -29,6 +29,7 @@ CONF_GROUP_BY_TYPE: Final = "group_by_type"
 CONF_CHECK_INTERNET: Final = "check_internet"
 CONF_PREFER_DNS: Final = "prefer_dns_names"
 CONF_WEAK_AFTER: Final = "weak_signal_minutes"
+CONF_OFFLINE_AFTER: Final = "offline_after_rounds"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -44,6 +45,8 @@ DEFAULT_SNMP_ENABLED: Final = True
 DEFAULT_PREFER_DNS: Final = False
 # A device whose signal has read below good for this many minutes is drawn in the weak-signal colour; 0 = never.
 DEFAULT_WEAK_AFTER: Final = 10
+# Alerts: a flagged node is offline after this many missed ping rounds in a row.
+DEFAULT_OFFLINE_AFTER: Final = 3
 SNMP_DEFAULT_COMMUNITY: Final = "public"
 
 # Free text people attach to a hub or device ("Managed by", extra fields)
@@ -89,6 +92,8 @@ EVENT_DEVICE_STALE: Final = f"{DOMAIN}_device_stale"
 EVENT_DEVICE_RECOVERED: Final = f"{DOMAIN}_device_recovered"
 EVENT_INTERNET_DOWN: Final = f"{DOMAIN}_internet_down"
 EVENT_INTERNET_UP: Final = f"{DOMAIN}_internet_up"
+EVENT_DEVICE_OFFLINE: Final = f"{DOMAIN}_device_offline"
+EVENT_DEVICE_ONLINE: Final = f"{DOMAIN}_device_online"
 
 # Internet check: big public DNS resolvers that answer pings. Down means none answer for
 # INTERNET_DOWN_AFTER ping rounds in a row while the router still answers.

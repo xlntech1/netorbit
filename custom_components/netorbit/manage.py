@@ -84,6 +84,15 @@ def stored_text(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def set_notify(cfg: dict[str, Any], notify: bool | None = None) -> None:
+    """Turn the offline/online alerts of a hub or device on or off in place. None leaves them alone."""
+    if notify is not None:
+        if notify:
+            cfg["notify"] = True
+        else:
+            cfg.pop("notify", None)
+
+
 def set_links(cfg: dict[str, Any], entities: Any) -> None:
     """Link entities to a node by role ({signal: sensor.x, lqi: sensor.y}); an empty value unlinks a role."""
     if entities is None:
@@ -224,6 +233,7 @@ def update_hub(opts: dict[str, Any], hub_id: str, **changes: Any) -> dict[str, A
         hub["parent"] = parent
         hub["parent_locked"] = True
     set_fields(hub, changes.get("managed_by"), changes.get("fields"))
+    set_notify(hub, changes.get("notify"))
     set_links(hub, changes.get("entities"))
     return {"hub": hub_id}
 

@@ -1,0 +1,51 @@
+blueprint:
+  name: NetOrbit - alerts for the devices you flagged
+  description: >
+    Sends a notification when a hub or device you flagged in NetOrbit goes offline
+    (after the number of missed ping rounds set under Settings) and when it comes back.
+  domain: automation
+  source_url: https://github.com/the-scott-davis/netorbit/blob/main/blueprints/automation/netorbit/device_alerts_notify.yaml
+  input:
+    notify_device:
+      name: Phone to notify
+      description: A device running the Home Assistant companion app.
+      selector:
+        device:
+          integration: mobile_app
+    notify_online:
+      name: Also notify when it comes back
+      default: true
+      selector:
+        boolean:
+
+mode: queued
+max: 50
+
+triggers:
+  - trigger: event
+    event_type: netorbit_device_offline
+    id: offline
+  - trigger: event
+    event_type: netorbit_device_online
+    id: online
+
+conditions:
+  - condition: or
+    conditions:
+      - condition: trigger
+        id: offline
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: online
+          - condition: template
+            value_template: !input notify_online
+
+actions:
+  - domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: >-
+      {{ trigger.event.data.name }} {{ 'is offline' if trigger.id == 'offline' else 'is back online' }}
+    message: >-
+      {% if trigger.id == 'offline' %}Not answering since {{ as_timestamp(trigger.event.data.last_seen, 0) | timestamp_custom('%a %-I:%M %p') if trigger.event.data.last_seen else 'it was added' }}.{% else %}Answering again{% endif %}{% if trigger.event.data.ip %} ({{ trigger.event.data.ip }}){% endif %}

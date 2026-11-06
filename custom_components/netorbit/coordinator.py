@@ -33,6 +33,7 @@ from .const import (
     CONF_IGNORE_RANDOM_MAC,
     CONF_IGNORED,
     CONF_MODE,
+    CONF_OFFLINE_AFTER,
     CONF_PING_INTERVAL,
     CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
@@ -45,12 +46,15 @@ from .const import (
     DEFAULT_DISCOVERY_INTERVAL,
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
+    DEFAULT_OFFLINE_AFTER,
     DEFAULT_PING_INTERVAL,
     DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
     DEFAULT_STALE_HOURS,
     DEFAULT_WEAK_AFTER,
     DOMAIN,
+    EVENT_DEVICE_OFFLINE,
+    EVENT_DEVICE_ONLINE,
     EVENT_DEVICE_RECOVERED,
     EVENT_DEVICE_STALE,
     EVENT_INTERNET_DOWN,
@@ -144,6 +148,7 @@ class Node:
     fields: dict[str, str] = field(default_factory=dict)  # more free text, label -> value
     wireless: dict[str, Any] | None = None  # radio details (see wireless/model.py), when any source has them
     entities: dict[str, str] | None = None  # entities a person linked by role: signal, lqi, ssid, ...
+    notify: bool = False  # fire offline/online events for this node
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -173,6 +178,7 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
     opts.setdefault(CONF_WIFI_CONTROLLERS, [])
     opts.setdefault(CONF_WEAK_AFTER, DEFAULT_WEAK_AFTER)
+    opts.setdefault(CONF_OFFLINE_AFTER, DEFAULT_OFFLINE_AFTER)
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -209,6 +215,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._last_sweep: datetime | None = None
         self._last_snmp_probe: datetime | None = None
         self._prev_status: dict[str, str] = {}
+        self._misses: dict[str, int] = {}  # ping rounds missed in a row, per node (alerts)
+        self._down: set[str] = set()  # nodes past offline_after_rounds
         self._alive_keys: set[str] = set()  # keys that answered the last ping round
         # Internet check: None until the first answer or INTERNET_DOWN_AFTER misses in a row.
         self._internet_up: bool | None = None
@@ -1119,6 +1127,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=own.get("vendor"),
                 **manage.stored_text(hub),
                 wireless=self._mark_weak(key, self._wireless_for(hub.get("mac") or rec.get("mac"), hub), now), entities=hub.get("entities"),
+                notify=bool(hub.get("notify")),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1148,6 +1157,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
                 **manage.stored_text(cfg),
                 wireless=self._mark_weak(key, self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), now), entities=cfg.get("entities"),
+                notify=bool(cfg.get("notify")),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,
@@ -1254,6 +1264,37 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 elif prev == STATUS_STALE and node.status == STATUS_ONLINE:
                     self.hass.bus.async_fire(EVENT_DEVICE_RECOVERED, payload)
             self._prev_status[key] = node.status
+        self._fire_alerts(data)
+
+    def _fire_alerts(self, data: NetOrbitData) -> None:
+        """Offline/online for nodes flagged notify: offline after offline_after_rounds missed ping rounds in
+        a row, online on the first answer. The counters start empty, so a restart never fires anything by itself."""
+        after = max(1, int(self.opts.get(CONF_OFFLINE_AFTER) or DEFAULT_OFFLINE_AFTER))
+        for key, node in data.nodes.items():
+            if node.kind == INTERNET_KEY:
+                continue
+            if key in self._alive_keys:
+                self._misses.pop(key, None)
+                if key in self._down:
+                    self._down.discard(key)
+                    if node.notify:
+                        self.hass.bus.async_fire(EVENT_DEVICE_ONLINE, self._alert_payload(node))
+                continue
+            if not node.ip:
+                continue  # nothing to ping, so never offline
+            misses = self._misses.get(key, 0) + 1
+            self._misses[key] = misses
+            if misses >= after and key not in self._down:
+                self._down.add(key)
+                if node.notify:
+                    self.hass.bus.async_fire(EVENT_DEVICE_OFFLINE, {**self._alert_payload(node), "missed_rounds": misses})
+        for key in [k for k in self._misses if k not in data.nodes]:
+            self._misses.pop(key, None)
+            self._down.discard(key)
+
+    @staticmethod
+    def _alert_payload(node: Node) -> dict[str, Any]:
+        return {"name": node.name, "ip": node.ip, "mac": node.mac, "kind": node.kind, "last_seen": node.last_seen, "hub": node.link}
 
     # ----- wireless --------------------------------------------------------------
 

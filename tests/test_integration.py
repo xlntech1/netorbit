@@ -840,3 +840,60 @@ async def test_weak_signal_is_flagged_after_a_while(hass: HomeAssistant, fake_ne
     await hass.async_block_till_done()
     await _advance(hass, freezer, 30 * 60)
     assert wireless()["weak"] is False and wireless()["weak_since"]
+
+
+async def test_offline_and_online_alerts(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """Flagged nodes fire offline after offline_after_rounds missed rounds and online on the first answer; others never."""
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B, "192.0.2.12": MAC_C}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    offline = async_capture_events(hass, "netorbit_device_offline")
+    online = async_capture_events(hass, "netorbit_device_online")
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify": True}, blocking=True)
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "notify": True}, blocking=True)
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    assert nodes["Device 53:0B"].attributes["notify"] is True and nodes["Router"].attributes["notify"] is True
+    assert nodes["Device 53:0C"].attributes["notify"] is False
+
+    # Both flagged nodes and the unflagged one stop answering: two misses are not enough, the third is.
+    fake_net.alive = set()
+    await _advance(hass, freezer, 60)
+    await _advance(hass, freezer, 60)
+    assert offline == []
+    await _advance(hass, freezer, 60)
+    assert sorted(e.data["name"] for e in offline) == ["Device 53:0B", "Router"]
+    ev = next(e for e in offline if e.data["name"] == "Device 53:0B")
+    assert ev.data["ip"] == "192.0.2.11" and ev.data["mac"] == MAC_B and ev.data["kind"] == "device"
+    assert ev.data["hub"] == "gateway" and ev.data["missed_rounds"] == 3 and ev.data["last_seen"]
+    await _advance(hass, freezer, 60)
+    assert len(offline) == 2  # staying down fires nothing more
+
+    # The device answers again: one online event; the router stays down.
+    fake_net.alive = {"192.0.2.11"}
+    await _advance(hass, freezer, 60)
+    assert [e.data["name"] for e in online] == ["Device 53:0B"]
+    # A single missed round after that is not an outage.
+    fake_net.alive = set()
+    await _advance(hass, freezer, 60)
+    fake_net.alive = {"192.0.2.11"}
+    await _advance(hass, freezer, 60)
+    assert len(offline) == 2 and len(online) == 1
+
+    # The window is a setting: with 1 round, the next miss fires at once.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "offline_after_rounds": 1})
+    await hass.async_block_till_done()
+    fake_net.alive = set()
+    await _advance(hass, freezer, 60)
+    assert len(offline) == 3 and offline[-1].data["missed_rounds"] == 1
+
+    # Export and import carry the flags.
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    assert exported["devices"][MAC_B]["notify"] is True and exported["hubs"][0]["notify"] is True
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify": False}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["notify"] is False
+    await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["notify"] is True

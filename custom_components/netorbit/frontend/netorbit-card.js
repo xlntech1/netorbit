@@ -1102,6 +1102,7 @@ class NetOrbitCard extends HTMLElement {
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {}, first_seen: a.first_seen,
         wireless: a.wireless || null, entities: a.linked_entities || null,
+        notify: a.notify === true,
         status: NO_STATUS[s.state] ? s.state : "unknown",
       };
       // A device just dropped on a hub is drawn there right away, with a "saving" ring, until
@@ -1112,7 +1113,7 @@ class NetOrbitCard extends HTMLElement {
         else { n.link = n.parent = opt.link; n.placement = "manual"; n.pending = true; }
       }
       // Free text is only shown in the details popup, but it is part of the signature so a saved edit redraws.
-      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields), noWirelessSig(n.wireless)].join("~"));
+      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields), noWirelessSig(n.wireless), n.notify ? 1 : 0].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -1310,6 +1311,9 @@ class NetOrbitCard extends HTMLElement {
   .pop .err { color:#fecaca; font-size:12px; margin-top:6px; min-height:0; }
   .pop .qbar { display:inline-block; width:56px; height:5px; border-radius:3px; background:rgba(148,163,184,.2); vertical-align:middle; margin-left:6px; overflow:hidden; }
   .pop .qbar i { display:block; height:100%; }
+  .pop .small { font-size:11.5px; margin-top:5px; }
+  .pop .chk { display:flex; align-items:center; gap:8px; margin-top:8px; color:#e2e8f0; font-size:12.5px; cursor:pointer; }
+  .pop .chk input { width:auto; margin:0; accent-color:#2563eb; }
   .mlist { max-height:240px; overflow:auto; margin-top:8px; }
   .mrow { display:flex; align-items:center; gap:8px; padding:4px 2px; cursor:pointer; border-radius:6px; }
   .mrow:hover { background:rgba(148,163,184,.1); }
@@ -2418,6 +2422,7 @@ class NetOrbitCard extends HTMLElement {
       `<div class="kv">${row("DNS name", dns && dns !== n.label ? noEsc(dns) : "")}${row("IP", noEsc(n.ip))}${row("MAC", noEsc(n.mac))}${row("Maker", noEsc(n.vendor))}</div>` +
       `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${row("Signal", signalHtml)}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
       (managed || fields ? `<div class="sec">Fields</div><div class="kv">${row("Managed by", managed)}${fields}</div>` : "") +
+      (n.notify ? `<div class="sec">Alerts</div><div class="kv">${row("Offline", "notify when it goes offline or comes back")}</div>` : "") +
       `<div class="sec">History</div><div class="kv">${row("First seen", n.first_seen ? noEsc(noRel(n.first_seen)) : "")}${row("Last seen", n.status === "online" ? "now" : noEsc(noRel(n.last_seen)))}${n.ip_changes ? row("IP changes", String(n.ip_changes)) : ""}</div>` +
       `<div class="row">${admin ? `<button class="go ed">Edit</button>` : ""}${n.entity ? `<button class="info">More info</button>` : ""}<button class="x">Close</button></div>`;
     const pop = this._openPop(html, ev, wrap, place, 320, 360);
@@ -2485,6 +2490,8 @@ class NetOrbitCard extends HTMLElement {
       `<label>Name<input class="name" ${n.kind === "device" ? `maxlength="${NO_NAME_MAX}" placeholder="Automatic name" ` : ""}value="${noEsc(n.label)}"></label>` +
       `<label>Managed by<input class="mb" value="${noEsc(n.managed_by || "")}" placeholder="A link, or the name of a hub or device on the map"></label>` +
       `<label>Extra fields, one per line as Label: value<textarea class="fx" rows="4" placeholder="Location: Garage&#10;Serial: ABC123">${noEsc(text)}</textarea></label>` +
+      `<div class="sec">Alerts</div>` +
+      `<label class="chk"><input type="checkbox" class="nf" ${n.notify ? "checked" : ""}> Notify when it goes offline or comes back</label>` +
       `<div class="sec">Signal</div>` +
       `<label>Signal sensor<select class="lse">${sensorOptions(/rssi|signal|dbm|wifi|wi_fi/i, links.signal)}</select></label>` +
       `<label>Link quality (LQI) sensor<select class="lle">${sensorOptions(/lqi|link_quality|linkquality/i, links.lqi)}</select></label>` +
@@ -2507,6 +2514,7 @@ class NetOrbitCard extends HTMLElement {
       const data = { managed_by: q(".mb").value.trim(), fields: Object.assign(Object.fromEntries(Object.keys(n.fields || {}).map((k) => [k, null])), fields) };
       const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
       const renamed = name !== String(n.label || "").trim().slice(0, NO_NAME_MAX);
+      data.notify = q(".nf").checked;
       const picks = { signal: q(".lse").value, lqi: q(".lle").value };
       if (picks.signal !== (links.signal || "") || picks.lqi !== (links.lqi || "")) data.entities = picks;
       if (n.kind === "hub") {

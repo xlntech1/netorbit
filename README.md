@@ -177,11 +177,11 @@ Under the integration's **Configure** menu:
 | Review suggested hubs | Confirm or dismiss everything NetOrbit thinks might be network gear. |
 | Paste a client list | Paste a client list from an access point, app or switch, pick the hub, and every device in it is placed there. |
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
-| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, linked signal sensors, stop tracking. |
+| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, linked signal sensors, offline alerts, stop tracking. |
 | Settings → Weak signal after | Minutes a device's signal must read below good (−80 dBm, LQI 80) before the map draws it yellow-green, between online and seen-recently; the clock only stops once it reads clearly good again (−75 dBm, LQI 100), so a device hovering at the threshold counts. 10 by default; 0 never colours it. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
 | Add / edit a Wi-Fi controller | The system that manages your access points, asked (read-only) which access point each wireless device uses, with its signal, band and channel. The connection is tested before it is saved. |
-| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off and SNMP community. |
+| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, the offline-alert window, SNMP on/off and SNMP community. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
 
@@ -189,6 +189,8 @@ Under the integration's **Configure** menu:
 
 **Prefer DNS and Bonjour names** (off by default) puts the name your network gives a device first, before what other integrations call it, and uses it for hubs NetOrbit named itself, such as *Router*. Anything you renamed yourself keeps your name.
 
+
+**Alerts per hub or device** (off by default). Tap a node, *Edit*, and tick *Notify when it goes offline or comes back*: NetOrbit fires `netorbit_device_offline` once it has missed the number of ping rounds set under **Settings > Offline after** (3 by default, so one dropped Wi-Fi packet never pages you) and `netorbit_device_online` when it answers again. The bundled blueprint *Alerts for the devices you flagged* turns both into phone notifications. The older stale and recovered events are unchanged and still cover every device.
 
 **Wireless signal.** When anything in Home Assistant knows about a device's radio, the details popup and the hover tooltip show it: Wi-Fi access point, SSID, band and channel, signal in dBm, SNR, Zigbee or Thread link quality, with a colour and a small bar (green from −80 dBm or LQI 80, amber from −90 dBm or LQI 40). Four sources, merged per device: the device's own sensors in Home Assistant (a ZHA relay's LQI and RSSI, a TP-Link plug's signal strength, a Matter device's Wi-Fi RSSI, ESPHome's `wifi_signal`: matched automatically through the MAC address, nothing to set up), what a device_tracker reports (UniFi gives SSID, band and access point), a Wi-Fi controller you add under **Configure**, and sensors you link by hand under *Edit* when the automatic match is missing or wrong (the companion app's Wi-Fi sensors on a phone, say). The `wireless` attribute carries it all for automations.
 
@@ -245,7 +247,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 | `show_share` | `true` | Show the Share button (image or video of the map, with names hidden by default and no addresses). |
 
-Hover a device for a summary. Tap a hub or device for its details: DNS name, addresses, maker, the hub it connects through and how it was placed, *Managed by* and extra fields, the wireless signal when known, first and last seen. *More info* there opens Home Assistant's own dialog. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get **Edit** in the popup and an **Edit layout** button on the card. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
+Hover a device for a summary. Tap a hub or device for its details: DNS name, addresses, maker, the hub it connects through and how it was placed, *Managed by* and extra fields, the wireless signal when known, alerts, first and last seen. *More info* there opens Home Assistant's own dialog. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get **Edit** in the popup and an **Edit layout** button on the card. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
@@ -262,6 +264,8 @@ Hover a device for a summary. Tap a hub or device for its details: DNS name, add
 | `netorbit_device_recovered` | `name`, `ip`, `mac`, `kind`, `last_seen` |
 | `netorbit_internet_down` | `since` |
 | `netorbit_internet_up` | `since` |
+| `netorbit_device_offline` | `name`, `ip`, `mac`, `kind`, `last_seen`, `hub`, `missed_rounds` (only for hubs and devices with *Offline alerts* on) |
+| `netorbit_device_online` | `name`, `ip`, `mac`, `kind`, `last_seen`, `hub` |
 
 Every service returns a response describing what it did. Devices can be given by name, IP or MAC; hubs by name or id.
 
@@ -271,12 +275,12 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.reset_placement` | `device` |
 | `netorbit.import_client_list` | `hub`, `text`, `add_missing` |
 | `netorbit.add_hub` | `name` or `device`, `type`, `parent`, `ip`, `mac` |
-| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields`, `entities` |
+| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields`, `entities`, `notify` |
 | `netorbit.remove_hub` | `hub` |
 | `netorbit.confirm_hub` | `device`, `type`, `name` |
 | `netorbit.dismiss_hub` | `device` |
 | `netorbit.track_device` | `mac` or `ip`, `name`, `icon`, `hub`, `sleepy` |
-| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label), `entities` (`{signal: sensor.x, lqi: sensor.y}`, roles signal, lqi, quality, ssid, bssid, channel) |
+| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label), `entities` (`{signal: sensor.x, lqi: sensor.y}`, roles signal, lqi, quality, ssid, bssid, channel), `notify` |
 | `netorbit.export_config` | none (returns your settings, keyed by MAC) |
 | `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
@@ -284,6 +288,7 @@ Every service returns a response describing what it did. Devices can be given by
 
 ### Blueprints
 
+- [Alerts for the devices you flagged](blueprints/automation/netorbit/device_alerts_notify.yaml): offline and back online, for hubs and devices with alerts turned on
 - [Notify when a device goes offline](blueprints/automation/netorbit/device_offline_notify.yaml)
 - [Notify when a new device joins](blueprints/automation/netorbit/new_device_notify.yaml)
 
