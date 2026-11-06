@@ -1278,6 +1278,7 @@ class NetOrbitCard extends HTMLElement {
   .pop .err { color:#fecaca; font-size:12px; margin-top:6px; min-height:0; }
   .pop .qbar { display:inline-block; width:56px; height:5px; border-radius:3px; background:rgba(148,163,184,.2); vertical-align:middle; margin-left:6px; overflow:hidden; }
   .pop .qbar i { display:block; height:100%; }
+  .pop .small { font-size:11.5px; margin-top:5px; }
   .mlist { max-height:240px; overflow:auto; margin-top:8px; }
   .mrow { display:flex; align-items:center; gap:8px; padding:4px 2px; cursor:pointer; border-radius:6px; }
   .mrow:hover { background:rgba(148,163,184,.1); }
