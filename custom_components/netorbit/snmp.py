@@ -1,4 +1,4 @@
-"""Read-only SNMP helpers: identify switches and read their MAC address tables."""
+"""Read-only SNMP helpers: identify switches, read their MAC address tables and their port counters."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 OID_BRIDGE_PORTS = "1.3.6.1.2.1.17.1.2.0"  # dot1dBaseNumPorts
 OID_Q_FDB_PORT = "1.3.6.1.2.1.17.7.1.2.2.1.2"  # dot1qTpFdbPort.<vlan>.<mac>
 OID_FDB_PORT = "1.3.6.1.2.1.17.4.3.1.2"  # dot1dTpFdbPort.<mac>
+OID_BRIDGE_IFINDEX = "1.3.6.1.2.1.17.1.4.1.2"  # dot1dBasePortIfIndex.<bridge port> -> ifIndex
+OID_IF_HC_IN = "1.3.6.1.2.1.31.1.1.1.6"  # ifHCInOctets.<ifIndex>
+OID_IF_HC_OUT = "1.3.6.1.2.1.31.1.1.1.10"  # ifHCOutOctets.<ifIndex>
+OID_IF_HIGH_SPEED = "1.3.6.1.2.1.31.1.1.1.15"  # ifHighSpeed.<ifIndex>, Mbit/s
 
 # Grandstream GWN access points list their Wi-Fi clients in GRANDSTREAM-GWN-MIB (gwnClientTable).
 GRANDSTREAM_OID_PREFIX = "1.3.6.1.4.1.42397"
@@ -204,6 +208,50 @@ class SnmpClient:
                         return out
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("SNMP client walk of %s %s failed: %s", host, base, err)
+            return out or None
+        return out
+
+    async def bridge_ports(self, host: str, community: str) -> dict[int, int]:
+        """{bridge port: ifIndex}. Empty when the switch does not say (then the two are taken as equal)."""
+        if not await self._ensure():
+            return {}
+        return await self._walk_ints(host, community, OID_BRIDGE_IFINDEX) or {}
+
+    async def if_counters(self, host: str, community: str) -> dict[int, tuple[int, int, int | None]] | None:
+        """{ifIndex: (octets in, octets out, speed Mbit/s or None)} from IF-MIB's 64-bit counters, or None."""
+        if not await self._ensure():
+            return None
+        in_octets = await self._walk_ints(host, community, OID_IF_HC_IN)
+        if not in_octets:
+            return None
+        out_octets = await self._walk_ints(host, community, OID_IF_HC_OUT) or {}
+        speeds = await self._walk_ints(host, community, OID_IF_HIGH_SPEED) or {}
+        return {idx: (val, out_octets.get(idx, 0), speeds.get(idx) or None) for idx, val in in_octets.items() if idx in out_octets}
+
+    async def _walk_ints(self, host: str, community: str, base: str) -> dict[int, int] | None:
+        """{last index: integer value} for one column of a table."""
+        m = self._mod
+        base_t = tuple(int(x) for x in base.split("."))
+        out: dict[int, int] = {}
+        try:
+            target = await self._target(host, WALK_TIMEOUT)
+            async for err_ind, err_stat, _idx, binds in m.bulk_walk_cmd(
+                self._engine, m.CommunityData(community, mpModel=1), target, m.ContextData(),
+                0, 40, m.ObjectType(m.ObjectIdentity(base)), lexicographicMode=False,
+            ):
+                if err_ind or err_stat:
+                    return out or None
+                for name, val in binds:
+                    oid = tuple(name)
+                    if oid[: len(base_t)] != base_t or len(oid) <= len(base_t):
+                        continue
+                    value = _value(val)
+                    if isinstance(value, int):
+                        out[int(oid[-1])] = value
+                    if len(out) >= MAX_TABLE:
+                        return out
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("SNMP walk of %s %s failed: %s", host, base, err)
             return out or None
         return out
 

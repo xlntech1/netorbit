@@ -82,7 +82,8 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
             if node.kind == INTERNET_KEY:
                 continue
             extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn),
-                                       ("wireless", node.wireless), ("alerts", node.notify)) if v}
+                                       ("wireless", node.wireless), ("alerts", node.notify),
+                                       ("throughput", node.throughput)) if v}
             if node.kind == "hub":
                 hubs.append({
                     "id": node.key.removeprefix("hub:"), "name": node.name, "type": node.hub_type,

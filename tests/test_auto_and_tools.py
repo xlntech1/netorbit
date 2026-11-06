@@ -38,6 +38,70 @@ def _network(fake_net, community: str = "public") -> None:
     fake_net.tables = {"192.0.2.2": {GW_MAC: 1, AP_MAC: 6, TV_MAC: 6, NAS_MAC: 3, MAYBE_MAC: 4}}
 
 
+async def test_traffic_on_links(hass: HomeAssistant, fake_net, freezer) -> None:
+    """Port counters give a device alone on a port, a hub on a port and the switch's uplink their rate; a device
+    sharing a port gets nothing from SNMP; a Wi-Fi controller's bandwidth fills in for its clients."""
+    from datetime import timedelta  # noqa: PLC0415
+
+    from homeassistant.util import dt as dt_util  # noqa: PLC0415
+
+    from custom_components.netorbit.wireless import WirelessInfo  # noqa: PLC0415
+
+    _network(fake_net)
+    # Bridge ports 1 (uplink), 3 (NAS), 4 (MAYBE), 6 (the AP with the TV behind it) are interfaces 101, 103, 104, 106.
+    fake_net.bridge = {"192.0.2.2": {1: 101, 3: 103, 4: 104, 6: 106}}
+    fake_net.counters = {"192.0.2.2": {101: (10_000, 20_000, 1000), 103: (1_000, 2_000, 1000), 104: (0, 0, 100), 106: (5_000, 6_000, 1000)}}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await entry.runtime_data.async_refresh()  # hubs exist, first counter reading taken
+    await hass.async_block_till_done()
+    assert _node_states(hass)["nas"].attributes["throughput"] is None  # one reading is no rate yet
+
+    # Sixty seconds later: 750 MB came into the NAS port (100 Mbit/s from the NAS), 75 MB left it; the AP's
+    # port moved 75 MB in and 150 MB out; the uplink 300 MB in and 150 MB out; the MAYBE port nothing.
+    fake_net.counters["192.0.2.2"] = {101: (10_000 + 300_000_000, 20_000 + 150_000_000, 1000), 103: (1_000 + 750_000_000, 2_000 + 75_000_000, 1000),
+                                      104: (0, 0, 100), 106: (5_000 + 75_000_000, 6_000 + 150_000_000, 1000)}
+    freezer.tick(timedelta(seconds=60))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    nas = nodes["nas"].attributes["throughput"]
+    assert nas["out_bps"] == 100_000_000 and nas["in_bps"] == 10_000_000 and nas["speed_mbps"] == 1000 and nas["utilization"] == 10
+    assert nas["source"] == "snmp:core_switch" and nas["at"]
+    ap = nodes["u6-lite-hall"].attributes["throughput"]
+    assert ap["in_bps"] == 20_000_000 and ap["out_bps"] == 10_000_000 and ap["utilization"] == 2  # everything behind the AP
+    sw = nodes["core-switch"].attributes["throughput"]
+    assert sw["in_bps"] == 40_000_000 and sw["out_bps"] == 20_000_000 and sw["source"] == "snmp:core_switch"  # its uplink
+    assert nodes["living-room-tv"].attributes["throughput"] is None  # shares port 6 with the AP: no port of its own
+    idle = nodes[next(n for n in nodes if nodes[n].attributes.get("mac") == MAYBE_MAC.upper())].attributes["throughput"]
+    assert idle["in_bps"] == 0 and idle["out_bps"] == 0 and idle["utilization"] == 0 and idle["speed_mbps"] == 100
+
+    # A counter that went backwards (the switch rebooted) gives no rate that round.
+    fake_net.counters["192.0.2.2"][103] = (5, 5, 1000)
+    freezer.tick(timedelta(seconds=60))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert _node_states(hass)["nas"].attributes["throughput"] is None
+
+    # Settings > Read port counters for traffic off: the rates go and the counters are not read again.
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "port_counters": False})
+    await hass.async_block_till_done()
+    asked = fake_net.counters.pop("192.0.2.2")
+    freezer.tick(timedelta(seconds=60))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert entry.runtime_data._port_rates == {}  # noqa: SLF001
+    assert _node_states(hass)["core-switch"].attributes["throughput"] is None
+    fake_net.counters["192.0.2.2"] = asked
+
+    # A Wi-Fi controller's per-station bandwidth fills in for a client that has no port of its own.
+    coord = entry.runtime_data
+    coord._ctrl_clients[TV_MAC] = WirelessInfo(mac=TV_MAC, tx_bps=24_000_000, rx_bps=210_000, rate_mbps=390, source="fortigate:Edge", at="2026-11-01T01:00:00+00:00")
+    data = coord._build(dt_util.utcnow(), coord._alive_keys)
+    tv = next(n for n in data.nodes.values() if n.mac == TV_MAC)
+    assert tv.throughput == {"in_bps": 24_000_000, "out_bps": 210_000, "speed_mbps": 390, "utilization": 6, "source": "fortigate:Edge", "at": "2026-11-01T01:00:00+00:00"}
+
+
 async def test_snmp_builds_the_layout(hass: HomeAssistant, fake_net) -> None:
     _network(fake_net)
     entry = _entry("auto")

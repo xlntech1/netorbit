@@ -22,6 +22,11 @@ class Topology:
 
     hub_parent: dict[str, str] = field(default_factory=dict)
     device_hub: dict[str, str] = field(default_factory=dict)
+    # Where things sit, for the port counters: device key / hub key -> (switch hub key, bridge port);
+    # per switch the port its router-facing traffic uses (None for the switch at the root).
+    device_port: dict[str, tuple[str, int]] = field(default_factory=dict)
+    hub_port: dict[str, tuple[str, int]] = field(default_factory=dict)
+    uplink: dict[str, int | None] = field(default_factory=dict)
 
 
 def macs_close(a: str | None, b: str | None, spread: int = 16) -> bool:
@@ -104,6 +109,7 @@ def infer(
         if loc:
             hub_location[hub] = loc
             result.hub_parent[hub] = loc[0]
+            result.hub_port[hub] = loc
 
     # Switches whose router MAC sits on a port facing another switch hang off that switch;
     # anything still unplaced hangs off the router.
@@ -160,4 +166,6 @@ def infer(
             continue
         hubs_here = by_port.get(loc, [])
         result.device_hub[key] = hubs_here[0] if len(hubs_here) == 1 else loc[0]
+        result.device_port[key] = loc
+    result.uplink = dict(uplink)
     return result

@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -610,3 +610,24 @@ test("under a hub, wired devices come by name and wireless ones strongest first"
   assert.deepStrictEqual(netorbitLayout({ hubs, devices, root: "r" }).slots.filter((s) => s.type === "dev").map((s) => s.d.key), order);
 });
 
+
+test("traffic: units, the line, link widths and the coarse signature", () => {
+  assert.strictEqual(noFmtBps(812_000), "812 kbit/s");
+  assert.strictEqual(noFmtBps(12_400_000), "12.4 Mbit/s");
+  assert.strictEqual(noFmtBps(1_200_000_000), "1.2 Gbit/s");
+  assert.strictEqual(noFmtBps(0), "0 bit/s");
+  const t = { in_bps: 12_400_000, out_bps: 812_000, speed_mbps: 1000, utilization: 1, source: "snmp:sw" };
+  assert.strictEqual(noTrafficLine(t), "12.4 Mbit/s down \u00b7 812 kbit/s up \u00b7 1% of 1.0 Gbit/s");
+  assert.strictEqual(noTrafficLine({ in_bps: 1500, out_bps: 0 }), "2 kbit/s down \u00b7 0 bit/s up");
+  assert.strictEqual(noTrafficLine(null), "");
+  assert.strictEqual(noLinkWidth(null), 1.4);
+  assert.strictEqual(noLinkWidth({ in_bps: 50_000, out_bps: 0 }), 1.4);
+  assert.ok(Math.abs(noLinkWidth({ in_bps: 1e6, out_bps: 0 }) - 2.2) < 1e-9);
+  assert.ok(Math.abs(noLinkWidth({ in_bps: 0, out_bps: 1e9 }) - 4.6) < 1e-9);
+  assert.strictEqual(noLinkWidth({ in_bps: 1e12, out_bps: 0 }), 5);
+  // One kbit/s more or less does not change the signature; a decade or a utilisation step does.
+  assert.strictEqual(noTrafficSig(t), noTrafficSig(Object.assign({}, t, { in_bps: 12_900_000 })));
+  assert.notStrictEqual(noTrafficSig(t), noTrafficSig(Object.assign({}, t, { in_bps: 124_000_000 })));
+  assert.notStrictEqual(noTrafficSig(t), noTrafficSig(Object.assign({}, t, { utilization: 15 })));
+  assert.strictEqual(noTrafficSig(null), "");
+});

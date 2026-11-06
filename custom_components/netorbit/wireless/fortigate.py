@@ -74,5 +74,7 @@ def parse_client(c: dict[str, Any], aps: dict[str, dict[str, Any]], source: str,
         ap_name=c.get("wtp_name") or ap.get("name") or (str(c.get("wtp_id")) if c.get("wtp_id") else None),
         ssid=c.get("ssid") or c.get("vap"), band=band, channel=to_int(c.get("channel")),
         signal_dbm=to_float(c.get("signal")), snr=to_float(c.get("snr")),
+        tx_bps=to_float(c.get("bandwidth_tx")), rx_bps=to_float(c.get("bandwidth_rx")),
+        rate_mbps=(rate / 1_000_000) if (rate := to_float(c.get("data_rate_bps"))) else None,
         source=f"fortigate:{source}", at=stamp,
     ))

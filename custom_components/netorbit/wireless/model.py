@@ -47,6 +47,10 @@ class WirelessInfo:
     quality: int | None = None  # 0-100
     source: str | None = None  # "entity:<id>", "tracker:<id>", "linked:<id>" or "<kind>:<controller name>"
     at: str | None = None
+    # Current traffic as a Wi-Fi controller sees it: towards the station (tx) and from it (rx), and the PHY rate.
+    tx_bps: float | None = None
+    rx_bps: float | None = None
+    rate_mbps: float | None = None
     # Filled by the coordinator, not by sources: since when the signal has read below good, and whether
     # that has lasted long enough (Settings > Weak signal after) to colour the node on the map.
     weak_since: str | None = None

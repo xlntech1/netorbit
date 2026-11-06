@@ -125,6 +125,13 @@
     Object.assign(byLabel("NAS").attributes, { fqdn: "nas.home.example", hostname: "nas", managed_by: "Office Switch", first_seen: new Date(Date.now() - 90 * 86400e3).toISOString(),
       fields: { Location: "Office closet", Serial: "NAS-00042", Notes: "Backups run at 02:00; spare disk in the drawer" } });
     Object.assign(byLabel("Printer").attributes, { fqdn: "printer.home.example", hostname: "printer", managed_by: "https://192.0.2.30/", fields: { Toner: "ordered 2026-10" } });
+    // Traffic from the switches' port counters (and the Wi-Fi controller for the streamer): wider lines, one busy port.
+    Object.assign(byLabel("NAS").attributes, { throughput: { in_bps: 38_400_000, out_bps: 412_000_000, speed_mbps: 1000, utilization: 41, source: "snmp:office", at: scanned } });
+    Object.assign(byLabel("Printer").attributes, { throughput: { in_bps: 2_100, out_bps: 900, speed_mbps: 100, utilization: 0, source: "snmp:office", at: scanned } });
+    Object.assign(byLabel("Desktop").attributes, { throughput: { in_bps: 940_000_000, out_bps: 61_000_000, speed_mbps: 1000, utilization: 94, source: "snmp:office", at: scanned } });
+    Object.assign(byLabel("Office Switch").attributes, { throughput: { in_bps: 120_000_000, out_bps: 480_000_000, speed_mbps: 1000, utilization: 48, source: "snmp:office", at: scanned } });
+    Object.assign(byLabel("Den AP").attributes, { throughput: { in_bps: 31_000_000, out_bps: 2_400_000, speed_mbps: 1000, utilization: 3, source: "snmp:core", at: scanned } });
+    Object.assign(byLabel("Streamer").attributes, { throughput: { in_bps: 24_000_000, out_bps: 210_000, speed_mbps: 390, utilization: 6, source: "fortigate:Edge", at: scanned } });
     // Radio details: a controller knows the AP, band and channel; a plain sensor only the signal.
     Object.assign(byLabel("Smart Plug").attributes, { wireless: { radio: "wifi", ap_name: "Den AP", ssid: "IoT", band: "2.4 GHz", channel: 6, signal_dbm: -61, snr: 34, quality: 78, source: "fortigate:Edge", at: scanned } });
     Object.assign(byLabel("Streamer").attributes, { wireless: { radio: "wifi", ssid: "Home", band: "5 GHz", channel: 44, signal_dbm: -72, quality: 56, source: "tracker:device_tracker.streamer", at: scanned } });

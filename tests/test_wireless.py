@@ -75,6 +75,14 @@ def test_merge_order_and_quality_reset() -> None:
     assert zig.quality == 83 and zig.radio == "zigbee"
 
 
+def test_fortigate_client_bandwidth() -> None:
+    c = {"mac": "00:00:5e:00:53:10", "wtp_name": "Hall AP", "ssid": "Home", "channel": 44, "signal": -61, "snr": 37,
+         "bandwidth_tx": 24_000_000, "bandwidth_rx": 210_000, "data_rate_bps": 390_000_000}
+    info = parse_client(c, {}, "Edge", "t")
+    assert info.tx_bps == 24_000_000 and info.rx_bps == 210_000 and info.rate_mbps == 390
+    assert parse_client({"mac": "00:00:5e:00:53:11"}, {}, "Edge", "t").rate_mbps is None
+
+
 def _ent(entity_id, **kw):
     base = {"translation_key": None, "original_name": None, "unique_id": "u", "original_device_class": None,
             "device_class": None, "unit_of_measurement": None, "platform": "x"}

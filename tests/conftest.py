@@ -42,6 +42,8 @@ class FakeNet:
         self.probed: list[tuple[str, str]] = []  # every (ip, community) NetOrbit asked
         self.mdns: dict[str, str] = {}  # ip -> Bonjour name, e.g. "Office-iMac.local"
         self.vendors: dict[str, str] = {}  # "AA:BB:CC" -> vendor name
+        self.counters: dict[str, dict[int, tuple[int, int, int | None]]] = {}  # ip -> {ifIndex: (in, out, speed)}
+        self.bridge: dict[str, dict[int, int]] = {}  # ip -> {bridge port: ifIndex}
 
     async def snmp_probe(self, _client, ip, community):
         self.probed.append((ip, community))
@@ -61,6 +63,15 @@ class FakeNet:
         if entry and entry[0] == community and ip in self.wifi:
             return self.wifi[ip]
         return None
+
+    async def snmp_counters(self, _client, ip, community):
+        entry = self.snmp.get(ip)
+        if entry and entry[0] == community and ip in self.counters:
+            return {k: tuple(v) for k, v in self.counters[ip].items()}
+        return None
+
+    async def snmp_bridge(self, _client, ip, community):
+        return dict(self.bridge.get(ip, {}))
 
     async def mdns_name(self, ip, timeout=1.0):
         return self.mdns.get(ip)
@@ -90,5 +101,7 @@ def fake_net():
         patch("custom_components.netorbit.snmp.SnmpClient.probe", autospec=True, side_effect=net.snmp_probe),
         patch("custom_components.netorbit.snmp.SnmpClient.mac_table", autospec=True, side_effect=net.snmp_table),
         patch("custom_components.netorbit.snmp.SnmpClient.wireless_clients", autospec=True, side_effect=net.snmp_wifi),
+        patch("custom_components.netorbit.snmp.SnmpClient.if_counters", autospec=True, side_effect=net.snmp_counters),
+        patch("custom_components.netorbit.snmp.SnmpClient.bridge_ports", autospec=True, side_effect=net.snmp_bridge),
     ):
         yield net

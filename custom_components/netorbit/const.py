@@ -30,6 +30,7 @@ CONF_CHECK_INTERNET: Final = "check_internet"
 CONF_PREFER_DNS: Final = "prefer_dns_names"
 CONF_WEAK_AFTER: Final = "weak_signal_minutes"
 CONF_OFFLINE_AFTER: Final = "offline_after_rounds"
+CONF_PORT_COUNTERS: Final = "port_counters"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -47,6 +48,8 @@ DEFAULT_PREFER_DNS: Final = False
 DEFAULT_WEAK_AFTER: Final = 10
 # Alerts: a flagged node is offline after this many missed ping rounds in a row.
 DEFAULT_OFFLINE_AFTER: Final = 3
+# Read every switch's port counters each round for traffic on the links (three short SNMP walks per switch).
+DEFAULT_PORT_COUNTERS: Final = True
 SNMP_DEFAULT_COMMUNITY: Final = "public"
 
 # Free text people attach to a hub or device ("Managed by", extra fields)

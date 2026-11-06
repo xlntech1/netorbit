@@ -34,6 +34,7 @@ from .const import (
     CONF_IGNORED,
     CONF_MODE,
     CONF_OFFLINE_AFTER,
+    CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
     CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
     DEFAULT_OFFLINE_AFTER,
+    DEFAULT_PORT_COUNTERS,
     DEFAULT_PING_INTERVAL,
     DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
@@ -102,6 +104,7 @@ from .wireless import GRADE_GOOD, AccessPointReader, ControllerError, WirelessIn
 from .wireless.entities import match_entities, read_entities, read_linked
 from .wireless.tracker import tracker_wireless_by_mac
 from .topology import Topology, infer, macs_close
+from .traffic import Counters, PortRate, from_port, port_rates, throughput as make_throughput
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -149,6 +152,7 @@ class Node:
     wireless: dict[str, Any] | None = None  # radio details (see wireless/model.py), when any source has them
     entities: dict[str, str] | None = None  # entities a person linked by role: signal, lqi, ssid, ...
     notify: bool = False  # fire offline/online events for this node
+    throughput: dict[str, Any] | None = None  # in_bps/out_bps (the device's view), speed_mbps, utilization, source, at (see traffic.py)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -179,6 +183,7 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_WIFI_CONTROLLERS, [])
     opts.setdefault(CONF_WEAK_AFTER, DEFAULT_WEAK_AFTER)
     opts.setdefault(CONF_OFFLINE_AFTER, DEFAULT_OFFLINE_AFTER)
+    opts.setdefault(CONF_PORT_COUNTERS, DEFAULT_PORT_COUNTERS)
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -228,6 +233,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._sweep_lock = asyncio.Lock()
         self._snmp = SnmpClient(hass)
         self._tables: dict[str, dict[str, int]] = {}
+        self._bridge_if: dict[str, dict[int, int]] = {}  # switch hub id -> {bridge port: ifIndex}
+        self._if_counters: dict[str, tuple[datetime, dict[int, Counters]]] = {}  # switch hub id -> last counter reading
+        self._port_rates: dict[str, dict[int, PortRate]] = {}  # switch hub id -> {ifIndex: bits/s in, out, speed}
+        self._port_members: dict[tuple[str, int], set[str]] = {}  # (switch hub id, bridge port) -> MACs seen there
         self._topology = Topology()
         self._controller_ap: dict[str, str] = {}
         self._ap_clients: dict[str, str] = {}  # client MAC -> hub id, from the AP's own SNMP client table
@@ -376,6 +385,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if ip:
                 rec["ip"] = ip
         await self._poll_controllers(now)
+        if self.opts[CONF_SNMP_ENABLED] and self.opts[CONF_PORT_COUNTERS] and self._tables:
+            await self._read_counters(now)
+        elif self._port_rates:
+            self._port_rates, self._if_counters = {}, {}
         self._controller_ap = client_access_points(self.hass)
         for mac, info in self._ctrl_clients.items():
             if info.ap_mac:
@@ -737,6 +750,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             table = await self._snmp.mac_table(host, comm)
             if table:
                 tables[hub["id"]] = table
+                self._bridge_if[hub["id"]] = await self._snmp.bridge_ports(host, comm)
         return tables
 
     async def _read_ap_clients(self) -> dict[str, str]:
@@ -816,6 +830,45 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if by_name[info.ap_name]:
                 hubs[mac] = by_name[info.ap_name]  # type: ignore[assignment]
         self._controller_hub = hubs
+
+    async def _read_counters(self, now: datetime) -> None:
+        """Read every switch's port counters once per round and turn two readings into rates."""
+        for hub in self.opts[CONF_HUBS]:
+            if hub["id"] not in self._tables:
+                continue
+            host, info = hub.get("host"), self._snmp_info(hub)
+            if not host or not info:
+                continue
+            comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
+            counters = await self._snmp.if_counters(host, comm)
+            if not counters:
+                continue
+            before = self._if_counters.get(hub["id"])
+            if before:
+                self._port_rates[hub["id"]] = port_rates(before[1], before[0], counters, now)
+            self._if_counters[hub["id"]] = (now, counters)
+
+    def _throughput_for(self, key: str, mac: str | None, hub_id: str | None, now: datetime) -> dict[str, Any] | None:
+        """A node's traffic: the rate of the switch port it has to itself (a device alone on a port, or a hub
+        on a port: everything behind it), a switch's own uplink port, else what a Wi-Fi controller reports."""
+        at = now.isoformat()
+        loc = self._topology.hub_port.get(hub_id) if hub_id else self._topology.device_port.get(key)
+        if loc:
+            sw, port = loc
+            if hub_id or self._port_members.get(loc) == {mac}:
+                found = from_port(self._port_rates.get(sw, {}).get(self._bridge_if.get(sw, {}).get(port, port)), f"snmp:{sw}", at)
+                if found:
+                    return found
+        if hub_id and hub_id in self._port_rates and self._topology.uplink.get(hub_id):
+            port = self._topology.uplink[hub_id]
+            rate = self._port_rates[hub_id].get(self._bridge_if.get(hub_id, {}).get(port, port))
+            if rate:
+                # The uplink carries the switch's whole traffic; seen from the switch, its input is what comes down.
+                return make_throughput(rate[0], rate[1], rate[2], f"snmp:{hub_id}", at)
+        info = self._ctrl_clients.get(mac) if mac else None
+        if info and (info.tx_bps is not None or info.rx_bps is not None):
+            return make_throughput(info.tx_bps, info.rx_bps, info.rate_mbps, info.source or "controller", info.at or at)
+        return None
 
     def _snmp_info(self, hub: dict[str, Any]) -> dict[str, Any] | None:
         info = (self._seen.get(f"hub:{hub['id']}") or {}).get("snmp")
@@ -963,6 +1016,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         # Parents a person has locked tell infer() which of several hubs sharing a switch port is the uplink.
         locked = {h["id"]: h["parent"] for h in self.opts[CONF_HUBS] if h.get("parent_locked") and h.get("parent") and h["parent"] != h["id"]}
         self._topology = infer(self._tables, hub_macs, gateway_mac, device_macs, ROOT_HUB_ID, leaf_hubs=leaf, hub_parents=locked)
+        self._port_members = {}
+        for sw, table in self._tables.items():
+            for mac, port in table.items():
+                self._port_members.setdefault((sw, port), set()).add(mac)
         stamp = now.isoformat()
         for key, hub_id in self._topology.device_hub.items():
             self._seen[key]["auto"] = {"hub": hub_id, "source": PLACE_SNMP, "at": stamp}
@@ -1128,6 +1185,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 **manage.stored_text(hub),
                 wireless=self._mark_weak(key, self._wireless_for(hub.get("mac") or rec.get("mac"), hub), now), entities=hub.get("entities"),
                 notify=bool(hub.get("notify")),
+                throughput=self._throughput_for(key, hub.get("mac") or rec.get("mac"), hub["id"], now),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1158,6 +1216,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 **manage.stored_text(cfg),
                 wireless=self._mark_weak(key, self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), now), entities=cfg.get("entities"),
                 notify=bool(cfg.get("notify")),
+                throughput=self._throughput_for(key, rec.get("mac") or cfg.get("mac"), None, now),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,

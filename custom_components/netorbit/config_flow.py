@@ -25,6 +25,7 @@ from .const import (
     CONF_IGNORED,
     CONF_MODE,
     CONF_OFFLINE_AFTER,
+    CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
     CONF_PREFER_DNS,
     CONF_WEAK_AFTER,
@@ -227,6 +228,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
                     CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
                     CONF_OFFLINE_AFTER: int(user_input[CONF_OFFLINE_AFTER]),
+                    CONF_PORT_COUNTERS: user_input[CONF_PORT_COUNTERS],
                 }
             )
             return self._save()
@@ -245,6 +247,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_OFFLINE_AFTER, default=o[CONF_OFFLINE_AFTER]): _int_box(1, 60, "rounds"),
                 vol.Required(CONF_WEAK_AFTER, default=o[CONF_WEAK_AFTER]): _int_box(0, 1440, "min"),
                 vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
+                vol.Required(CONF_PORT_COUNTERS, default=o[CONF_PORT_COUNTERS]): bool,
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
                     sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
                 ),
