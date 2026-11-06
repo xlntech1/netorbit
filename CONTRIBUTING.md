@@ -28,8 +28,10 @@ Small and focused PRs get reviewed fastest. If you're planning something big, op
 
 ## Running the checks locally
 
+The tests need Python 3.14.2 or newer, like current Home Assistant.
+
 ```bash
-python -m venv .venv && . .venv/bin/activate
+python3.14 -m venv .venv && . .venv/bin/activate
 pip install -r requirements_test.txt
 pytest
 node --test tests/card.test.js

@@ -81,13 +81,13 @@ def report(title: str) -> None:
 def pinned_version() -> str:
     """The Home Assistant release the unit tests run against.
 
-    requirements_test.txt pulls in pytest-homeassistant-custom-component, and each release of that package pins
-    one exact homeassistant version. Download the wheel pip would pick (no dependencies) and read the pin from it.
+    requirements_test.txt pulls in pytest-homeassistant, and each release of that package pins one exact
+    homeassistant version. Download the wheel pip would pick (no dependencies) and read the pin from it.
     """
     req = next(
         line.strip()
         for line in (ROOT / "requirements_test.txt").read_text().splitlines()
-        if line.strip().startswith("pytest-homeassistant-custom-component")
+        if line.strip().startswith("pytest-homeassistant")
     )
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(

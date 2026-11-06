@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: scripts/ci/requirements_e2e.txt
       - run: pip install -r scripts/ci/requirements_e2e.txt
@@ -41,7 +41,7 @@ jobs:
       - name: Pick the Home Assistant image
         id: image
         run: |
-          # "pinned" is the release the unit tests run against (pytest-homeassistant-custom-component pins it).
+          # "pinned" is the release the unit tests run against (pytest-homeassistant pins it).
           if [ "${{ matrix.ha }}" = pinned ]; then tag=$(python scripts/ci/ha_e2e.py pinned-version); else tag=beta; fi
           echo "Home Assistant image tag: $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"

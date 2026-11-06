@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14" # current Home Assistant and pytest-homeassistant need 3.14.2 or newer
       - run: pip install -r requirements_test.txt
       - name: Install the conversation packages Home Assistant pins (used by the AI tool tests)
         run: |
@@ -38,21 +38,6 @@ jobs:
         with:
           node-version: "22"
       - run: node --test tests/card.test.js
-
-  tools-on-current-ha:
-    name: Assistant tools on Home Assistant 2026.10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-      - name: Install the test harness release that pins Home Assistant 2026.10 (the unit-test job gets 2026.2 on Python 3.13)
-        run: pip install "pytest-homeassistant-custom-component==0.13.375" "icmplib>=3.0.3" "pysnmp>=7.1" "aiooui>=0.1.9"
-      - name: Install the conversation packages Home Assistant pins (used by the AI tool tests)
-        run: |
-          pip install $(python -c "import json, pathlib, importlib.util; root = pathlib.Path(importlib.util.find_spec('homeassistant').origin).parent; print(' '.join(json.loads((root / 'components' / 'conversation' / 'manifest.json').read_text())['requirements']))")
-      - run: pytest -q tests/test_auto_and_tools.py
 
   browser:
     name: Browser tests (${{ matrix.browser }})

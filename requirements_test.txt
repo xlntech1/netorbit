@@ -1,4 +1,6 @@
-pytest-homeassistant-custom-component
+# Home Assistant's own test package. Its versions follow Home Assistant's and need Python 3.14.2 or newer;
+# the floor keeps an older Python from quietly installing the unrelated 0.1 releases of the same name from 2020.
+pytest-homeassistant>=2026.11.0
 icmplib>=3.0.3
 pysnmp>=7.1
 aiooui>=0.1.9

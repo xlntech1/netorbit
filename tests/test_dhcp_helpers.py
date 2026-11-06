@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant.common import async_fire_time_changed
 
 
 async def advance(hass, freezer, seconds: float) -> None:

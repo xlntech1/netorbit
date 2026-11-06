@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Tests run on the current Home Assistant.** The tests now use Home Assistant's own `pytest-homeassistant` instead of `pytest-homeassistant-custom-component`, which is retired and stops at Home Assistant 2026.10. CI runs them on Python 3.14 against Home Assistant 2026.11, and the end-to-end "pinned" run follows. Nothing changes for users: NetOrbit still needs Home Assistant 2026.2 or newer.
+
 ## 0.3.0
 
 ### Added

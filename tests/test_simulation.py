@@ -25,7 +25,7 @@ from collections import Counter
 from datetime import timedelta
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
