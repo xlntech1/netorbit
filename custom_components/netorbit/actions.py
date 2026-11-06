@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from . import manage
+from . import groups, manage
 from .const import CONF_DEVICES, CONF_HUBS, CONF_IGNORED, HUB_AP, INTERNET_KEY, ROOT_HUB_ID
 from .logic import extract_addresses, normalize_mac
 
@@ -271,6 +271,91 @@ async def update_device(
         opts[CONF_IGNORED].remove(key)
     await _save(hass, entry, coord, opts)
     return {"device": (name or "").strip() or _name(coord, key)}
+
+
+def _node_key(coord: NetOrbitCoordinator, ref: Any) -> str | None:
+    """A hub ('hub:<id>', or its name, IP or MAC when no device has it) or a device, as its key on the map."""
+    ref = str(ref).strip()
+    if not ref.startswith("hub:"):
+        key = coord.resolve_device(ref)
+        if key:
+            return key
+    hub = coord.resolve_hub(ref)
+    return f"hub:{hub}" if hub else None
+
+
+def _kind(coord: NetOrbitCoordinator, key: str) -> str:
+    node = coord.data.nodes.get(key) if coord.data else None
+    if node is not None and node.kind in groups.ROLES:
+        return node.kind
+    return "hub" if key.startswith("hub:") else "device"
+
+
+def _label(coord: NetOrbitCoordinator, key: str) -> str:
+    if key.startswith("hub:"):
+        node = coord.data.nodes.get(key) if coord.data else None
+        if node is not None:
+            return node.name
+        hub = next((h for h in coord.opts[CONF_HUBS] if h["id"] == key[4:]), None)
+        return (hub or {}).get("name") or key[4:]
+    return _name(coord, key)
+
+
+async def update_many(
+    hass, entry, coord, devices: list[str] | None = None, match: dict[str, Any] | None = None, preview: bool = False,
+    **changes: Any,
+) -> dict[str, Any]:
+    """Make the same changes on many hubs and devices at once, in one save: the ones listed, plus the ones a match
+    finds. preview returns what would change without saving anything."""
+    if not devices and not match:
+        raise ActionError("Give the devices to change, a match, or both")
+    nodes = coord.data.nodes if coord.data else {}
+    keys: list[str] = []
+    missing: list[str] = []
+    for ref in devices or []:
+        key = _node_key(coord, ref)
+        if key is None:
+            missing.append(str(ref))
+        elif key not in keys:
+            keys.append(key)
+    if match:
+        under = _hub(coord, match["under"]) if match.get("under") else None
+        try:
+            found = groups.match(
+                nodes, role=match.get("role"), under=under, direct_only=bool(match.get("direct_only")),
+                types=match.get("type"), connections=match.get("connection"), field=match.get("field"),
+                name=match.get("name"), vendor=match.get("vendor"), ip_range=match.get("ip_range"),
+            )
+        except ValueError as err:
+            raise ActionError(str(err)) from err
+        keys += [k for k in found if k not in keys]
+    # None leaves a setting alone (False is a real change for sleep; for reset_placement it means no).
+    changes = {k: v for k, v in changes.items() if v is not None and not (k == "reset_placement" and not v)}
+    if changes.get("hub") and changes.get("reset_placement"):
+        raise ActionError("Pick a hub or automatic placement, not both")
+    if not keys and not preview:
+        raise ActionError("Nothing matches" + (f". Not found: {', '.join(missing)}" if missing else ""))
+    if not changes and not preview:
+        raise ActionError("Nothing to change: give at least one setting, or preview: true to see what matches")
+    if changes.get("hub"):
+        changes["hub"] = _hub(coord, changes["hub"])
+    names = {k: _label(coord, k) for k in keys}
+    opts = _opts(coord)
+    result = manage.update_many(opts, [(k, _kind(coord, k)) for k in keys], names=names, **changes)
+    if result["changed"] and not preview:
+        await _save(hass, entry, coord, opts)
+    out: dict[str, Any] = {
+        "matched": [names[k] for k in keys],
+        "changed": [names[k] for k in result["changed"]],
+        "unchanged": len(keys) - len(result["changed"]),
+    }
+    if preview:
+        out["preview"] = True
+    if result["skipped"]:
+        out["skipped"] = {setting: [names[k] for k in ks] for setting, ks in result["skipped"].items()}
+    if missing:
+        out["not_found"] = missing
+    return out
 
 
 async def scan_ports(hass, entry, coord, devices: list[str] | None = None) -> dict[str, Any]:

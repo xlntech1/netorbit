@@ -38,6 +38,9 @@
     },
     "import_config": {
       "service": "mdi:import"
+    },
+    "update_many": {
+      "service": "mdi:checkbox-multiple-marked-outline"
     }
   }
 }

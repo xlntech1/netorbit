@@ -273,6 +273,85 @@ def update_hub(opts: dict[str, Any], hub_id: str, **changes: Any) -> dict[str, A
     return {"hub": hub_id}
 
 
+# Device settings NetOrbit keeps for itself; a change to only these is no change a person made.
+_BOOKKEEPING = ("tracked", "placed_at")
+
+
+def _settings(cfg: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in cfg.items() if k not in _BOOKKEEPING}
+
+
+def update_many(
+    opts: dict[str, Any],
+    targets: list[tuple[str, str]],
+    names: dict[str, str] | None = None,
+    icon: str | None = None,
+    sleepy: bool | None = None,
+    hub: str | None = None,
+    reset_placement: bool = False,
+    managed_by: str | None = None,
+    fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Make the same changes on many hubs and devices, in place. targets: (key, kind), kind hub or device.
+
+    None (or False for reset_placement) leaves a setting alone. A setting a node doesn't have is skipped for it:
+    hubs have no icon, sleep or automatic placement (their hub is their parent). A hub is not moved under itself,
+    under a hub below it, or at all when it is the router. Returns the keys that changed and, per setting, the keys
+    it was skipped for.
+    """
+    names = names or {}
+    skipped: dict[str, list[str]] = {}
+    changed: list[str] = []
+    if hub is not None and hub not in hub_ids(opts):
+        raise ManageError(f"No hub called {hub}")
+    for key, kind in targets:
+        if kind == "hub":
+            hub_id = key.removeprefix("hub:")
+            cfg = hub_by_id(opts, hub_id)
+            before = copy.deepcopy(cfg)
+            for setting, given in (("icon", icon is not None), ("sleepy", sleepy is not None), ("reset_placement", reset_placement)):
+                if given:
+                    skipped.setdefault(setting, []).append(key)
+            if hub is not None:
+                if hub_id == ROOT_HUB_ID or hub == hub_id or creates_cycle(opts[CONF_HUBS], hub_id, hub):
+                    skipped.setdefault("hub", []).append(key)
+                elif cfg.get("parent") != hub:
+                    cfg["parent"] = hub
+                    cfg["parent_locked"] = True
+        else:
+            existed = key in opts[CONF_DEVICES]
+            cfg = opts[CONF_DEVICES].setdefault(key, {})
+            before = copy.deepcopy(cfg)
+            if icon is not None:
+                if icon.strip():
+                    cfg["icon"] = icon.strip()
+                else:
+                    cfg.pop("icon", None)
+            if sleepy is not None:
+                cfg["sleepy"] = bool(sleepy)
+            if hub is not None and cfg.get("hub") != hub:
+                cfg["hub"] = hub
+                cfg["placed_at"] = dt_util.utcnow().isoformat()
+            elif reset_placement:
+                cfg.pop("hub", None)
+                cfg.pop("placed_at", None)
+        try:
+            set_fields(cfg, managed_by, fields)
+        except ManageError as err:
+            raise ManageError(f"{names.get(key, key)}: {err}") from err
+        if kind == "hub":
+            if cfg != before:
+                changed.append(key)
+        elif _settings(cfg) != _settings(before):
+            changed.append(key)
+            cfg["tracked"] = True
+            if key in opts[CONF_IGNORED]:
+                opts[CONF_IGNORED].remove(key)
+        elif not existed:
+            opts[CONF_DEVICES].pop(key, None)
+    return {"changed": changed, "skipped": skipped}
+
+
 def remove_hub(opts: dict[str, Any], hub_id: str) -> dict[str, Any]:
     if hub_id == ROOT_HUB_ID:
         raise ManageError("The router cannot be removed")

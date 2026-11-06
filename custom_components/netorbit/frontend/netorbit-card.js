@@ -129,6 +129,69 @@ function noNotifySummary(value) {
   return [].concat(value).map(Number).filter(Number.isFinite).sort((a, b) => a - b).join(", ") || "off";
 }
 
+// Select mode: how a node reaches the network, for the Connection groups: the radio its link details name (Wi-Fi
+// from a controller, Zigbee from a linked sensor), else wired. groups.py's connection() is the same rule.
+const NO_SEL_CONN = Object.assign({ wired: "Wired" }, NO_RADIO, { other: "Other radio" });
+function noSelConn(n) {
+  const r = n && n.wireless && n.wireless.radio;
+  if (!r) return "wired";
+  return NO_SEL_CONN[r] && r !== "wired" ? r : "other";
+}
+
+// Select mode: the hubs and devices a person can pick on this map, by key, including devices folded into a
+// "+N more" bubble.
+function noSelNodes(hubs, devices) {
+  const out = {};
+  Object.values(hubs).forEach((h) => { if (h.kind === "hub") out[h.key] = h; });
+  const add = (d) => { if (d.kind === "device") out[d.key] = d; };
+  devices.forEach((d) => (d.kind === "more" ? (d.members || []).forEach(add) : add(d)));
+  return out;
+}
+
+// Select mode: the groups the bar offers, from what the map shows: [{sec, label, keys}]. The type groups and the
+// connections are the integration's own (groups.py), so a group here is the group update_many's match finds.
+function noSelGroups(hubs, devices, root) {
+  const nodes = noSelNodes(hubs, devices);
+  const list = Object.values(nodes);
+  const out = [];
+  const add = (sec, label, picked) => { if (picked.length) out.push({ sec, label: `${label} (${picked.length})`, keys: picked.map((n) => n.key) }); };
+  const real = list.filter((n) => n.kind === "hub");
+  const devs = list.filter((n) => n.kind !== "hub");
+  add("Role", "All hubs", real);
+  add("Role", "All devices", devs);
+  const above = (n) => {
+    const out2 = [];
+    let cur = n.kind === "hub" ? n.parent : n.link;
+    while (cur && !out2.includes(cur) && out2.length < 64) { out2.push(cur); cur = hubs[cur] ? hubs[cur].parent : null; }
+    return out2;
+  };
+  real.filter((h) => h.key !== root).sort((a, b) => String(a.label).localeCompare(String(b.label))).forEach((h) => {
+    const branch = list.filter((n) => n.key !== h.key && above(n).includes(h.key));
+    const direct = branch.filter((n) => above(n)[0] === h.key);
+    add("Under a hub", `Everything under ${h.label}`, branch);
+    if (direct.length !== branch.length) add("Under a hub", `Straight off ${h.label}`, direct);
+  });
+  [...NO_GROUPS, { id: "other", label: "Other devices" }].forEach((g) => add("Type", g.label, devs.filter((n) => noGroupFor(n.icon) === g.id)));
+  Object.entries(NO_HUB_TYPE).forEach(([t, label]) => add("Type", `Hubs: ${label}`, real.filter((n) => (NO_HUB_TYPE[n.hub_type] ? n.hub_type : "other") === t)));
+  const conns = Object.keys(NO_SEL_CONN).map((c) => [c, list.filter((n) => noSelConn(n) === c)]).filter(([, l]) => l.length);
+  if (conns.length > 1) conns.forEach(([c, l]) => add("Connection", NO_SEL_CONN[c], l));
+  // Extra fields as tags: a label and value that two or more share (a serial number is no group).
+  const tags = {};
+  list.forEach((n) => Object.entries(n.fields || {}).forEach(([k, v]) => {
+    const id = `${k.toLowerCase()}\u0000${String(v).toLowerCase()}`;
+    (tags[id] = tags[id] || { text: `${k}: ${v}`, nodes: [] }).nodes.push(n);
+  }));
+  Object.values(tags).filter((t) => t.nodes.length > 1).sort((a, b) => a.text.localeCompare(b.text)).forEach((t) => add("Extra field", t.text, t.nodes));
+  return out;
+}
+
+// Select mode: the update_many data that makes one set of changes on these nodes (hubs as hub:<id>).
+function noBulkCall(nodes, changes, hub) {
+  const data = Object.assign({ device: nodes.map((n) => n.key) }, changes);
+  if (hub) data.hub = hub.key.replace(/^hub:/, "");
+  return data;
+}
+
 // One line about a node's radio link: "Wi-Fi · Den AP · IoT · 5 GHz ch 44 · −61 dBm · SNR 37", or "Zigbee · LQI 212 · −58 dBm".
 function noWirelessLine(w) {
   if (!w) return "";
@@ -1095,7 +1158,7 @@ class NetOrbitCard extends HTMLElement {
       this._mode = "takeover";
       return;
     }
-    const sig = JSON.stringify([model.sig, this._edit, mode]);
+    const sig = JSON.stringify([model.sig, this._edit, !!this._select, mode]);
     if (sig === this._sig) return;
     this._sig = sig;
     // The first scan just finished: play the map in once.
@@ -1252,6 +1315,13 @@ class NetOrbitCard extends HTMLElement {
     }
     this._model_ = model;
     const edit = this._edit && mode !== "takeover" && mode !== "reveal";
+    const selecting = edit && !!this._select;
+    // Select mode: what can be picked, and the groups to pick from. A selected node the map no longer shows (the
+    // Filter hid it, it was removed) leaves the selection, so Edit never changes something out of sight.
+    this._selNodes = noSelNodes(hubs, devices);
+    this._selGroups = selecting ? noSelGroups(hubs, devices, root) : [];
+    if (!this._sel) this._sel = new Set();
+    [...this._sel].forEach((k) => { if (!this._selNodes[k]) this._sel.delete(k); });
     const D = netorbitDraw(model, cfg, { edit });
     const pos = D.pos;
     this._pos = pos;
@@ -1290,9 +1360,19 @@ class NetOrbitCard extends HTMLElement {
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:#cbd5e1; background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.14); padding:4px 10px; border-radius:999px; font-variant-numeric:tabular-nums; }
   .chip i { width:8px; height:8px; border-radius:50%; display:inline-block; }
   .chip.sug { border-color:rgba(244,114,182,.5); color:#f9a8d4; }
-  .editbtn { font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid rgba(96,165,250,.45); background:transparent; color:#bfdbfe; cursor:pointer; }
-  .editbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
-  .editbtn ha-icon { --mdc-icon-size:16px; }
+  .editbtn, .selbtn { font:inherit; font-size:12.5px; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius:999px; border:1px solid rgba(96,165,250,.45); background:transparent; color:#bfdbfe; cursor:pointer; }
+  .editbtn.on, .selbtn.on { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .editbtn ha-icon, .selbtn ha-icon { --mdc-icon-size:16px; }
+  .selbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:6px 18px 10px; padding:8px 10px; border-radius:10px; background:rgba(37,99,235,.12); border:1px solid rgba(96,165,250,.35); font-size:13px; }
+  .selbar .cnt { margin-right:auto; color:#dbeafe; font-variant-numeric:tabular-nums; }
+  .selbar select { font:inherit; font-size:12.5px; padding:5px 8px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#0b1220; color:#e2e8f0; max-width:230px; }
+  .selbar button { font:inherit; font-size:12.5px; padding:5px 12px; border-radius:8px; border:1px solid rgba(148,163,184,.3); background:#1e293b; color:#e2e8f0; cursor:pointer; }
+  .selbar button.go { background:#2563eb; border-color:#2563eb; color:#fff; }
+  .selbar button[disabled] { opacity:.5; cursor:default; }
+  .node.sel .disc { stroke:#f8fafc !important; stroke-width:5; stroke-dasharray:none; }
+  .node.selpart .disc { stroke:#f8fafc !important; stroke-width:3.5; stroke-dasharray:4 3; }
+  .node.sel .dlab { fill:#fff; font-weight:600; }
+  .wrap.hassel .node:not(.sel):not(.selpart) { opacity:.45; }
   .banner { margin:6px 18px 0; padding:8px 12px; border-radius:8px; background:rgba(37,99,235,.15); border:1px solid rgba(96,165,250,.35); font-size:13px; color:#dbeafe; }
   .wrap { position:relative; }
   svg { font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif); width:100%; height:auto; display:block; max-height:${noHeight(cfg.height)}; user-select:none; -webkit-user-select:none; }
@@ -1371,6 +1451,7 @@ class NetOrbitCard extends HTMLElement {
   .pop .small { font-size:11.5px; margin-top:5px; }
   .pop .chk { display:flex; align-items:center; gap:8px; margin-top:8px; color:#e2e8f0; font-size:12.5px; cursor:pointer; }
   .pop .chk input { width:auto; margin:0; accent-color:#2563eb; }
+  .pop .dirty, .pop .chk.dirty { border-color:#60a5fa; color:#bfdbfe; }
   .pop .pgrid { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; margin-top:2px; }
   .pop .pgrid .chk { margin-top:4px; font-size:12px; }
   .pop .ports { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
@@ -1391,7 +1472,7 @@ class NetOrbitCard extends HTMLElement {
   .scanchip { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; color:#bfdbfe; background:rgba(37,99,235,.14); border:1px solid rgba(96,165,250,.45); padding:4px 11px 4px 8px; border-radius:999px; font-variant-numeric:tabular-nums; }
   .scanchip svg { width:15px; height:15px; display:block; }
   .scanchip .rb { animation: spin 1.6s linear infinite; transform-box:fill-box; transform-origin:center; }
-  .revealing .head > .chip, .revealing .head > .sharebtn, .revealing .head > .editbtn { display:none; }
+  .revealing .head > .chip, .revealing .head > .sharebtn, .revealing .head > .editbtn, .revealing .head > .selbtn { display:none; }
   .revealing .legend, .legend.hide { visibility:hidden; }
   .scanpill { position:absolute; left:50%; bottom:3.5%; transform:translateX(-50%); text-align:center; pointer-events:none; background:rgba(11,18,32,.88); border:1px solid rgba(96,165,250,.35); border-radius:14px; padding:10px 18px 9px; box-shadow:0 8px 30px rgba(0,0,0,.45); min-width:min(300px, 84%); max-width:92%; box-sizing:border-box; }
   .scanpill .l1 { font-size:15px; font-weight:600; color:#e2e8f0; font-variant-numeric:tabular-nums; }
@@ -1451,9 +1532,11 @@ class NetOrbitCard extends HTMLElement {
     ${nSug ? `<span class="chip sug"><i style="background:${NO_SUGGEST.color}"></i>${nSug} possible hub${nSug > 1 ? "s" : ""}</span>` : ""}
     ${scanChip}
     ${share ? `<button class="sharebtn" title="Share an image or video of your map"><ha-icon icon="mdi:share-variant"></ha-icon>Share</button>` : ""}
+    ${admin && edit ? `<button class="selbtn ${selecting ? "on" : ""}" title="Pick several hubs and devices and change them together"><ha-icon icon="mdi:checkbox-multiple-marked-outline"></ha-icon>Select</button>` : ""}
     ${admin ? `<button class="editbtn ${edit ? "on" : ""}"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil"}"></ha-icon>${edit ? "Done" : "Edit layout"}</button>` : ""}`}
   </div>
-  ${edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename it, change its type, move it under another hub, or remove it.</div>` : ""}
+  ${selecting ? `<div class="banner">Tap hubs and devices to select them, or add a whole group from the list under the map. Edit changes them all at once; anything you leave alone stays as it is on each one.</div>`
+    : edit ? `<div class="banner">Drag a device onto the hub it connects through, or tap it for more options. Tap a hub to rename it, change its type, move it under another hub, or remove it. Select picks several to change together.</div>` : ""}
   <div class="wrap">
     <svg class="map" viewBox="${NO_VIEW.x} ${NO_VIEW.y} ${NO_VIEW.w} ${NO_VIEW.h}" role="img" aria-label="Network map">
       <defs><filter id="noblur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>
@@ -1467,6 +1550,9 @@ class NetOrbitCard extends HTMLElement {
     ${pill}
     ${cfg.zoom !== false ? `<div class="zoomctl"><button class="zin" title="Zoom in" aria-label="Zoom in"><ha-icon icon="mdi:plus"></ha-icon></button><button class="zout" title="Zoom out" aria-label="Zoom out"><ha-icon icon="mdi:minus"></ha-icon></button><button class="zfit" title="Whole map" aria-label="Whole map"><ha-icon icon="mdi:fit-to-screen-outline"></ha-icon></button></div>` : ""}
   </div>
+  ${selecting ? `<div class="selbar"><span class="cnt"></span><select class="selby" aria-label="Add a group to the selection"><option value="">Add a group…</option>${
+    [...new Set(this._selGroups.map((g) => g.sec))].map((sec) => `<optgroup label="${noEsc(sec)}">${this._selGroups.map((g, i) => (g.sec === sec ? `<option value="${i}">${noEsc(g.label)}</option>` : "")).join("")}</optgroup>`).join("")
+  }</select><button class="selclr">Clear</button><button class="go seledit">Edit</button></div>` : ""}
   ${cfg.show_legend ? `<div class="legend ${takeover ? "hide" : ""}">
     <span>Moving line = answering pings</span>
     ${withTraffic.length ? `<span>Wider line = more traffic; dashed over it = port past 70%</span>` : ""}
@@ -1481,12 +1567,25 @@ class NetOrbitCard extends HTMLElement {
 </ha-card>`;
 
     const btn = this.shadowRoot.querySelector(".editbtn");
-    if (btn) btn.addEventListener("click", () => { this._edit = !this._edit; this._sig = ""; this.hass = this._hass; });
+    if (btn) btn.addEventListener("click", () => { this._edit = !this._edit; this._select = false; this._sel = new Set(); this._sig = ""; this.hass = this._hass; });
+    const selbtn = this.shadowRoot.querySelector(".selbtn");
+    if (selbtn) selbtn.addEventListener("click", () => { this._select = !this._select; this._sel = new Set(); this._sig = ""; this.hass = this._hass; });
+    const selby = this.shadowRoot.querySelector(".selby");
+    if (selby) selby.addEventListener("change", () => {
+      const g = this._selGroups[Number(selby.value)];
+      selby.value = "";
+      if (g) { g.keys.forEach((k) => this._sel.add(k)); this._markSel(); }
+    });
+    const selclr = this.shadowRoot.querySelector(".selclr");
+    if (selclr) selclr.addEventListener("click", () => { this._sel.clear(); this._markSel(); });
+    const seledit = this.shadowRoot.querySelector(".seledit");
+    if (seledit) seledit.addEventListener("click", (ev) => this._bulkEdit(ev));
     const sbtn = this.shadowRoot.querySelector(".sharebtn");
     if (sbtn) sbtn.addEventListener("click", () => this._sharePopup());
     this._wire(model);
     this._wireZoom();
     this._resolveIcons();
+    this._markSel();
   }
 
   // The first scan: only the router, with the radar, until the scan finishes and the map plays in.
@@ -1902,6 +2001,7 @@ class NetOrbitCard extends HTMLElement {
       el.style.left = Math.max(4, x) + "px"; el.style.top = Math.max(4, y) + "px";
     };
     this._detailsCtx = { wrap, place, hubs, all, col };
+    this._allNodes = all;
     const toSvg = (ev) => {
       const pt = svg.createSVGPoint();
       pt.x = ev.clientX; pt.y = ev.clientY;
@@ -1940,7 +2040,7 @@ class NetOrbitCard extends HTMLElement {
       el.addEventListener("mouseleave", () => (tip.style.opacity = "0"));
 
       el.addEventListener("pointerdown", (ev) => {
-        if (!this._edit || n.kind !== "device") return;
+        if (!this._edit || this._select || n.kind !== "device") return;
         ev.preventDefault();
         this._drag = { n, x0: ev.clientX, y0: ev.clientY, moved: false, id: ev.pointerId };
         el.setPointerCapture(ev.pointerId);
@@ -1982,6 +2082,7 @@ class NetOrbitCard extends HTMLElement {
       el.addEventListener("pointercancel", (ev) => { if (this._drag) { this._drag = null; ghost.setAttribute("cx", -500); } });
 
       el.addEventListener("click", (ev) => {
+        if (this._edit && this._select) { this._toggleSel(n); return; }
         if (this._edit && n.kind === "device") return; // handled by pointer events
         if (n.suggested && this._isAdmin()) { this._suggestPopup(n, ev, wrap, place); return; }
         if (n.kind === "new") { this._newPopup(n, ev, wrap, place); return; }
@@ -2648,6 +2749,127 @@ class NetOrbitCard extends HTMLElement {
     if (q(".npany")) { q(".npany").addEventListener("change", syncAny); syncAny(); }
   }
 
+  // Select mode: the keys a tap on node n picks. A "+N more" bubble or a type group stands for the devices in it.
+  _selMembers(n) {
+    const nodes = this._selNodes || {};
+    if (!n) return [];
+    if (n.kind === "more") return (n.members || []).map((m) => m.key).filter((k) => nodes[k]);
+    if (n.kind === "group") return Object.values(nodes).filter((x) => x.link === n.key).map((x) => x.key);
+    return nodes[n.key] ? [n.key] : [];
+  }
+
+  // A tap adds the node (or all of a bubble), or takes it out when it is all in already.
+  _toggleSel(n) {
+    const keys = this._selMembers(n);
+    if (!keys.length) return;
+    const all = keys.every((k) => this._sel.has(k));
+    keys.forEach((k) => (all ? this._sel.delete(k) : this._sel.add(k)));
+    this._markSel();
+  }
+
+  // Show the selection on the map and in the bar without drawing the map again.
+  _markSel() {
+    const sr = this.shadowRoot;
+    if (!sr || !sr.querySelectorAll) return;
+    const sel = this._sel || new Set();
+    const on = this._edit && this._select;
+    sr.querySelectorAll(".node[data-key]").forEach((el) => {
+      const keys = on ? this._selMembers((this._allNodes || {})[el.dataset.key]) : [];
+      const n = keys.filter((k) => sel.has(k)).length;
+      el.classList.toggle("sel", n > 0 && n === keys.length);
+      el.classList.toggle("selpart", n > 0 && n < keys.length);
+    });
+    const wrap = sr.querySelector(".wrap");
+    if (wrap) wrap.classList.toggle("hassel", on && sel.size > 0);
+    const cnt = sr.querySelector(".selbar .cnt");
+    if (!cnt) return;
+    const picked = [...sel].map((k) => this._selNodes[k]).filter(Boolean);
+    const nh = picked.filter((x) => x.kind === "hub").length, nd = picked.length - nh;
+    const parts = [nd ? `${nd} device${nd === 1 ? "" : "s"}` : "", nh ? `${nh} hub${nh === 1 ? "" : "s"}` : ""].filter(Boolean);
+    cnt.textContent = parts.length ? `${parts.join(" and ")} selected` : "Nothing selected yet";
+    sr.querySelector(".seledit").disabled = !picked.length;
+    sr.querySelector(".selclr").disabled = !picked.length;
+    sr.querySelector(".seledit").textContent = picked.length ? `Edit ${picked.length}` : "Edit";
+  }
+
+  // One Edit form for everything selected. A setting left alone stays as it is on each one: checkboxes start in
+  // the mixed state when the selection differs, and only what is touched is sent, in one update_many call.
+  _bulkEdit(ev) {
+    const ctx = this._detailsCtx;
+    const nodes = [...(this._sel || [])].map((k) => this._selNodes[k]).filter(Boolean);
+    if (!ctx || !nodes.length) return;
+    const { wrap, place, hubs } = ctx;
+    const devs = nodes.filter((n) => n.kind !== "hub");
+    const nh = nodes.length - devs.length;
+    const tri = (list, f) => { const on = list.filter(f).length; return { on, n: list.length, mixed: on > 0 && on < list.length, all: on > 0 && on === list.length }; };
+    const sleepy = tri(devs, (n) => n.sleepy);
+    const mbs = [...new Set(nodes.map((n) => n.managed_by || ""))];
+    const box = (cls, t, label) => `<label class="chk"><input type="checkbox" class="${cls}" ${t.all ? "checked" : ""}> ${label}</label>` +
+      (t.mixed ? `<div class="muted small">On for ${t.on} of ${t.n} now. Left as is unless you tick or untick it.</div>` : "");
+    const hubList = Object.values(hubs).filter((h) => h.kind === "hub")
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+    const what = [devs.length ? `${devs.length} device${devs.length === 1 ? "" : "s"}` : "", nh ? `${nh} hub${nh === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+    const pop = this._openPop(
+      `<b>Edit ${nodes.length} selected</b><div class="muted">${noEsc(what)}. Anything you leave alone stays as it is on each one.</div>` +
+      (devs.length ?
+        box("bsl", sleepy, "Allowed to sleep (never marked as gone)") +
+        `<label>Icon<select class="bic"><option value="">Leave as is</option><option value="auto">Back to the automatic icon</option><option value="set">Set to…</option></select></label>` +
+        `<input class="bicv" placeholder="mdi:cctv" hidden>` : "") +
+      `<label>Connects through<select class="bhub"><option value="">Leave as is</option>${devs.length ? `<option value="__auto">Automatic placement</option>` : ""}` +
+        hubList.map((h) => `<option value="${noEsc(h.key)}">${noEsc(h.label)}</option>`).join("") + `</select></label>` +
+      (nh ? `<div class="muted small">Selected hubs move under it too, except the router and a hub it would loop through.</div>` : "") +
+      `<label>Managed by<input class="bmb" value="${mbs.length === 1 ? noEsc(mbs[0]) : ""}" placeholder="${mbs.length === 1 ? "None set" : "Differs: left as is unless you type here"}"></label>` +
+      `<label>Extra fields to add or change, one per line as Label: value<textarea class="bfx" rows="3" placeholder="Group: Critical"></textarea></label>` +
+      `<div class="muted small">Other fields stay. A label with nothing after the colon is removed.</div>` +
+      `<div class="err"></div>` +
+      `<div class="row"><button class="go save">Save on ${nodes.length}</button><button class="x">Close</button></div>`,
+      ev, wrap, place, 320, 420
+    );
+    if (pop.classList) pop.classList.add("det");
+    const q = (s) => pop.querySelector(s);
+    const touched = new Set();
+    const mark = (cls, el) => { touched.add(cls); const l = el.closest ? el.closest("label") : null; if (l && l.classList) l.classList.add("dirty"); else if (el.classList) el.classList.add("dirty"); };
+    [["bsl", sleepy]].forEach(([cls, t]) => {
+      const el = q("." + cls);
+      if (!el) return;
+      if (t.mixed) el.indeterminate = true;
+      el.addEventListener("change", () => mark(cls, el));
+    });
+    ["bmb", "bfx"].forEach((cls) => q("." + cls).addEventListener("input", () => mark(cls, q("." + cls))));
+    q(".bhub").addEventListener("change", () => mark("bhub", q(".bhub")));
+    if (q(".bic")) q(".bic").addEventListener("change", () => { q(".bicv").hidden = q(".bic").value !== "set"; mark("bic", q(".bic")); });
+    const save = q(".save");
+    save.addEventListener("click", () => {
+      const ch = {};
+      const err = (m) => { q(".err").textContent = m; };
+      if (touched.has("bsl")) ch.sleepy = q(".bsl").checked;
+      if (q(".bic") && q(".bic").value === "auto") ch.icon = "";
+      if (q(".bic") && q(".bic").value === "set") {
+        const icon = q(".bicv").value.trim();
+        if (!/^[a-z0-9_-]+:[a-z0-9_-]+$/i.test(icon)) { err("Write the icon as mdi:name, like mdi:cctv."); return; }
+        ch.icon = icon;
+      }
+      if (touched.has("bmb")) ch.managed_by = q(".bmb").value.trim();
+      if (q(".bfx").value.trim()) {
+        let f;
+        try { f = noParseFields(q(".bfx").value); } catch (e) { err(e.message); return; }
+        ch.fields = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v || null]));
+      }
+      const hv = q(".bhub").value;
+      if (hv === "__auto") ch.reset_placement = true;
+      const hub = hv && hv !== "__auto" ? hubs[hv] : null;
+      if (!Object.keys(ch).length && !hub) { err("Nothing to save yet: change a setting first."); return; }
+      save.disabled = true;
+      err("");
+      this._call("update_many", noBulkCall(nodes, ch, hub)).then((ok) => {
+        save.disabled = false;
+        if (!ok) return;
+        if (pop.isConnected) this._closePop(wrap);
+        this._notify(`NetOrbit: saved on ${nodes.length} selected.`);
+      });
+    });
+  }
+
   _summaryEntry() {
     const s = this._entities().find((x) => x.attributes.kind === "summary");
     return s ? s.attributes.config_entry_id : undefined;
@@ -2676,5 +2898,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noPorts, noNotifySummary };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noPorts, noNotifySummary, noSelConn, noSelNodes, noSelGroups, noBulkCall };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

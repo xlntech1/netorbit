@@ -138,6 +138,7 @@ SERVICE_CONFIRM_HUB: Final = "confirm_hub"
 SERVICE_DISMISS_HUB: Final = "dismiss_hub"
 SERVICE_RESET: Final = "reset_placement"
 SERVICE_SCAN_PORTS: Final = "scan_ports"
+SERVICE_UPDATE_MANY: Final = "update_many"
 
 # Frontend
 CARD_URL: Final = f"/{DOMAIN}/netorbit-card.js"

@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac, noPorts, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noNotifySummary } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noPorts, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noNotifySummary, noSelConn, noSelNodes, noSelGroups, noBulkCall } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -646,4 +646,74 @@ test("port alert summary", () => {
   assert.strictEqual(noNotifySummary([]), "off");
   assert.strictEqual(noNotifySummary("any"), "any port");
   assert.strictEqual(noNotifySummary([443, 22]), "22, 443");
+});
+
+test("Select: the groups follow the map, folded devices included; tags only when two or more share them", () => {
+  const hubs = {
+    "hub:gateway": { key: "hub:gateway", kind: "hub", label: "Router", parent: null, hub_type: "router", ip: "192.0.2.1" },
+    "hub:house": { key: "hub:house", kind: "hub", label: "House AP", parent: "hub:gateway", hub_type: "access_point", ip: "192.0.2.5", fields: { Group: "Critical" } },
+    "hub:garage": { key: "hub:garage", kind: "hub", label: "Garage switch", parent: "hub:house", hub_type: "switch", ip: "192.0.2.6" },
+    "__grp_media": { key: "__grp_media", kind: "group", label: "TV & media", parent: "hub:gateway" },
+  };
+  const cam = { key: "aa", kind: "device", link: "hub:garage", icon: "mdi:cctv" };
+  const bell = { key: "bb", kind: "device", link: "hub:house", icon: "mdi:doorbell-video", wireless: { radio: "wifi" }, fields: { group: "critical", Serial: "X1" } };
+  const tv = { key: "cc", kind: "device", link: "__grp_media", icon: "mdi:television" };
+  const more = { key: "more:hub:house", kind: "more", link: "hub:house", members: [{ key: "dd", kind: "device", link: "hub:house", icon: "mdi:laptop" }] };
+  const devices = [cam, bell, tv, more, { key: "new:x", kind: "new", link: "__new" }];
+  assert.deepStrictEqual(Object.keys(noSelNodes(hubs, devices)).sort(), ["aa", "bb", "cc", "dd", "hub:garage", "hub:gateway", "hub:house"]);
+  const g = Object.fromEntries(noSelGroups(hubs, devices, "hub:gateway").map((x) => [x.label, x.keys.sort()]));
+  assert.deepStrictEqual(g["All hubs (3)"], ["hub:garage", "hub:gateway", "hub:house"]);
+  assert.deepStrictEqual(g["All devices (4)"], ["aa", "bb", "cc", "dd"]);
+  assert.deepStrictEqual(g["Everything under House AP (4)"], ["aa", "bb", "dd", "hub:garage"]);
+  assert.deepStrictEqual(g["Straight off House AP (3)"], ["bb", "dd", "hub:garage"]);
+  assert.ok(!("Straight off Garage switch (1)" in g), "a hub with no hubs below it offers the branch only");
+  assert.deepStrictEqual(g["Cameras & security (2)"], ["aa", "bb"]);
+  assert.deepStrictEqual(g["Hubs: Switch (1)"], ["hub:garage"]);
+  assert.deepStrictEqual(g["Wi-Fi (1)"], ["bb"]);
+  assert.deepStrictEqual(g["Wired (6)"], ["aa", "cc", "dd", "hub:garage", "hub:gateway", "hub:house"], "hubs go by their link too, as update_many's match does");
+  assert.strictEqual(noSelConn({ wireless: { radio: "lora" } }), "other");
+  assert.deepStrictEqual(g["Group: Critical (2)"], ["bb", "hub:house"]);
+  assert.ok(!Object.keys(g).some((k) => k.startsWith("Serial")), "a value only one node has is no group");
+  assert.ok(!Object.keys(g).some((k) => k.startsWith("Everything under Router")), "the router's branch is everything");
+});
+
+test("Select: one update_many call for the whole selection, the hub by its id", () => {
+  assert.deepStrictEqual(noBulkCall([{ key: "aa", kind: "device" }, { key: "hub:house", kind: "hub" }], { sleepy: true }, { key: "hub:garage" }),
+    { device: ["aa", "hub:house"], sleepy: true, hub: "garage" });
+  assert.deepStrictEqual(noBulkCall([{ key: "aa" }], { reset_placement: true }, null), { device: ["aa"], reset_placement: true });
+});
+
+test("Select: the Edit form sends only what was touched, in one update_many call", async () => {
+  const card = new globalThis.NetOrbitCard();
+  const calls = [];
+  card._call = (service, data) => { calls.push([service, data]); return Promise.resolve(true); };
+  card._closePop = () => {};
+  card._notify = () => {};
+  const el = () => {
+    const l = {};
+    return { value: "", textContent: "", checked: false, disabled: false, hidden: false, indeterminate: false, classList: { add() {} }, closest: () => null,
+      addEventListener: (t, f) => (l[t] = f), fire: (t) => l[t] && l[t](), click: () => l.click() };
+  };
+  const parts = Object.fromEntries([".bsl", ".bic", ".bicv", ".bhub", ".bmb", ".bfx", ".save", ".err"].map((k) => [k, el()]));
+  let html = "";
+  card._openPop = (h) => { html = h; return { isConnected: true, classList: { add() {} }, querySelector: (q) => parts[q] }; };
+  const hubs = { "hub:garage": { key: "hub:garage", kind: "hub", label: "Garage" } };
+  card._detailsCtx = { wrap: {}, place: () => {}, hubs };
+  const a = { key: "aa", kind: "device", sleepy: true, fields: {} };
+  const b = { key: "bb", kind: "device", sleepy: false, fields: {} };
+  const h = { key: "hub:house", kind: "hub", fields: {} };
+  card._selNodes = { aa: a, bb: b, "hub:house": h };
+  card._sel = new Set(["aa", "bb", "hub:house"]);
+  card._bulkEdit({});
+  assert.ok(parts[".bsl"].indeterminate, "mixed settings start in the mixed state");
+  assert.ok(!/Alerts|Notify/.test(html), "the alert settings stay per device for now");
+  parts[".save"].click();
+  assert.match(parts[".err"].textContent, /Nothing to save/);
+  parts[".bmb"].value = "Rack 2"; parts[".bmb"].fire("input");
+  parts[".bfx"].value = "Group: Critical\nOld:"; parts[".bfx"].fire("input");
+  parts[".bhub"].value = "hub:garage"; parts[".bhub"].fire("change");
+  parts[".save"].click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepStrictEqual(calls, [["update_many", { device: ["aa", "bb", "hub:house"], managed_by: "Rack 2", fields: { Group: "Critical", Old: null }, hub: "garage" }]],
+    "sleep was left alone; the fields merge and an empty one is removed");
 });

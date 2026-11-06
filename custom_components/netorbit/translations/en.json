@@ -672,6 +672,52 @@
           "description": "Only needed if you have more than one NetOrbit entry."
         }
       }
+    },
+    "update_many": {
+      "name": "Update many",
+      "description": "Change the same settings on many hubs and devices at once, in one save: the ones listed, plus every one a match finds. Settings left out stay as they are on each one. Returns what matched, what changed and what was skipped.",
+      "fields": {
+        "device": {
+          "name": "Hubs and devices",
+          "description": "Names, IPs or MAC addresses. Write a hub as hub: and its id (hub:den_ap) when a device has the same name."
+        },
+        "match": {
+          "name": "Match",
+          "description": "Also change every hub and device that meets all of these: role (hub or device), under (a hub; add direct_only: true for only what hangs straight off it), type (cameras, media, computers, home, other, or a hub type), connection (wired, wifi, or the radio a linked entity names), field (\"Group: Critical\", or \"Group\" for any value), name (text or a pattern like cam*), vendor, ip_range (192.0.2.0/28)."
+        },
+        "preview": {
+          "name": "Preview",
+          "description": "Return what would change without saving anything."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Icon for the devices. Empty goes back to the automatic one. Hubs are skipped."
+        },
+        "sleepy": {
+          "name": "Allowed to sleep",
+          "description": "Never fire a stale event for these devices. Hubs are skipped."
+        },
+        "hub": {
+          "name": "Hub",
+          "description": "Hub the devices connect through. Hubs in the list move under it, except the router and hubs it would loop through."
+        },
+        "reset_placement": {
+          "name": "Automatic placement",
+          "description": "Let NetOrbit place the devices again."
+        },
+        "managed_by": {
+          "name": "Managed by",
+          "description": "A link or the name of the thing on the map that manages them. Empty removes it."
+        },
+        "fields": {
+          "name": "Extra fields",
+          "description": "Label to value pairs to add or change on each one; the other fields stay. An empty value removes that label."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
     }
   }
 }

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from pathlib import Path
+from typing import Any
 
 import voluptuous as vol
 
@@ -15,7 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from . import actions
+from . import actions, groups
 from .const import (
     CARD_FILENAME,
     CARD_URL,
@@ -34,6 +36,7 @@ from .const import (
     SERVICE_TRACK,
     SERVICE_UPDATE_DEVICE,
     SERVICE_UPDATE_HUB,
+    SERVICE_UPDATE_MANY,
     SERVICE_EXPORT,
     SERVICE_IMPORT,
     VERSION,
@@ -59,6 +62,29 @@ TEXT_FIELDS = {vol.Optional("managed_by"): cv.string, vol.Optional("fields"): FI
                vol.Optional("entities"): vol.Schema({cv.string: vol.Any(None, "", cv.entity_id)}),
                vol.Optional("notify"): cv.boolean, vol.Optional("notify_ports"): NOTIFY_PORTS}
 
+
+
+def _ip_range(value: Any) -> str:
+    """Validator: an IPv4 or IPv6 network like 192.0.2.0/28 (a single address is a range of one)."""
+    try:
+        return str(ipaddress.ip_network(cv.string(value).strip(), strict=False))
+    except ValueError as err:
+        raise vol.Invalid(f"{value} is not an address range like 192.0.2.0/28") from err
+
+
+# Which hubs and devices update_many changes, besides the ones listed: every condition given must hold.
+MATCH = vol.Schema({
+    vol.Optional("role"): vol.All(cv.ensure_list, [vol.In(groups.ROLES)]),
+    vol.Optional("under"): cv.string,
+    vol.Optional("direct_only"): cv.boolean,
+    vol.Optional("type"): vol.All(cv.ensure_list, [vol.In((*groups.DEVICE_TYPES, *HUB_TYPES))]),
+    vol.Optional("connection"): vol.All(cv.ensure_list, [vol.In(groups.CONNECTIONS)]),
+    vol.Optional("field"): vol.Any(cv.string, FIELDS),
+    vol.Optional("name"): cv.string,
+    vol.Optional("vendor"): cv.string,
+    vol.Optional("ip_range"): _ip_range,
+})
+
 SCHEMAS: dict[str, vol.Schema] = {
     SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
                                vol.Optional("name"): cv.string, vol.Optional("icon"): cv.icon,
@@ -80,6 +106,11 @@ SCHEMAS: dict[str, vol.Schema] = {
     SERVICE_UPDATE_DEVICE: vol.Schema({**ENTRY, vol.Required("device"): cv.string, vol.Optional("name"): cv.string,
                                        vol.Optional("icon"): vol.Any("", cv.icon), vol.Optional("sleepy"): cv.boolean,
                                        vol.Optional("hub"): cv.string, **TEXT_FIELDS}),
+    SERVICE_UPDATE_MANY: vol.Schema({**ENTRY, vol.Optional("device"): DEVICE_LIST, vol.Optional("match"): MATCH,
+                                     vol.Optional("preview", default=False): cv.boolean,
+                                     vol.Optional("icon"): vol.Any("", cv.icon), vol.Optional("sleepy"): cv.boolean,
+                                     vol.Optional("hub"): cv.string, vol.Optional("reset_placement"): cv.boolean,
+                                     vol.Optional("managed_by"): cv.string, vol.Optional("fields"): FIELDS}),
     SERVICE_IMPORT_LIST: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Required("text"): cv.string,
                                      vol.Optional("add_missing", default=True): cv.boolean}),
     SERVICE_CONFIRM_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string, vol.Optional("assign"): DEVICE_LIST,
@@ -130,6 +161,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                                                                       sleepy=a.get("sleepy"), hub=a.get("hub"),
                                                                       managed_by=a.get("managed_by"), fields=a.get("fields"), entities=a.get("entities"),
                                                                       notify=a.get("notify"), notify_ports=a.get("notify_ports")),
+        SERVICE_UPDATE_MANY: lambda e, c, a: actions.update_many(hass, e, c, a.get("device"), a.get("match"), a["preview"],
+                                                                  **{k: v for k, v in a.items() if k not in ("device", "match", "preview")}),
         SERVICE_IMPORT_LIST: lambda e, c, a: actions.import_list(hass, e, c, a["hub"], a["text"], a["add_missing"]),
         SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name"), a.get("assign")),
         SERVICE_DISMISS_HUB: lambda e, c, a: actions.dismiss_hub(hass, e, c, a["device"]),

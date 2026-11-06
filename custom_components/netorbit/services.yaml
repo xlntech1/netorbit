@@ -116,3 +116,16 @@ import_config:
     data: {required: true, selector: {object: {}}}
     replace: {default: false, selector: {boolean: {}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+update_many:
+  fields:
+    device: {example: "[hub:den_ap, Living Room TV]", selector: {text: {multiple: true}}}
+    match: {example: "{role: device, type: cameras, under: Den AP}", selector: {object: {}}}
+    preview: {default: false, selector: {boolean: {}}}
+    icon: {selector: {icon: {}}}
+    sleepy: {selector: {boolean: {}}}
+    hub: {selector: {text: {}}}
+    reset_placement: {selector: {boolean: {}}}
+    managed_by: {selector: {text: {}}}
+    fields: {example: "{Group: Critical}", selector: {object: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
