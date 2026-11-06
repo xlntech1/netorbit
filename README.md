@@ -288,7 +288,7 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.export_config` | none (returns your settings, keyed by MAC) |
 | `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
-| `netorbit.scan_now` | none |
+| `netorbit.scan_now` | none (sweeps the subnet, probes the hubs and looks every device's DNS name up again) |
 
 ### Blueprints
 

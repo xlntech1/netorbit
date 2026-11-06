@@ -230,7 +230,7 @@ async def _sync(value: Any) -> Any:
 
 
 async def _scan(coord) -> dict[str, Any]:
-    coord.request_sweep(probe=True)
+    coord.request_sweep(probe=True, names=True)
     await coord.async_refresh()
     return {"done": True, "devices": len(coord.data.nodes) if coord.data else 0}
 

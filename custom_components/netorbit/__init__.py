@@ -104,7 +104,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return actions.export_config(coord)
 
     async def _scan(entry, coord, args):
-        coord.request_sweep(probe=True)
+        coord.request_sweep(probe=True, names=True)
         await coord.async_refresh()
         return {"devices": len(coord.data.nodes) if coord.data else 0}
 

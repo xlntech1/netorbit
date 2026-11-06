@@ -359,7 +359,7 @@
     },
     "scan_now": {
       "name": "Scan now",
-      "description": "Sweep the subnet for new devices right away.",
+      "description": "Sweep the subnet for new devices right away, probe the hubs and look every device's DNS name up again.",
       "fields": {
         "config_entry_id": {
           "name": "Config entry",

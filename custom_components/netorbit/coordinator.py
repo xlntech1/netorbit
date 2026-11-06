@@ -229,6 +229,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._internet_changed: str | None = None  # when it last went up or down
         self._force_sweep = False
         self._force_probe = False
+        self._force_names = False
         self._privileged: bool | None = None
         self._sweep_lock = asyncio.Lock()
         self._snmp = SnmpClient(hass)
@@ -298,10 +299,12 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         if self.opts.get(CONF_WIFI_CONTROLLERS) != old_ctrl:
             self._ctrl_backoff.clear()  # a changed controller is asked again at once
 
-    def request_sweep(self, probe: bool = False) -> None:
-        """Run a discovery sweep (and optionally an SNMP probe) on the next update."""
+    def request_sweep(self, probe: bool = False, names: bool = False) -> None:
+        """Run a discovery sweep on the next update; with `probe` an SNMP probe too, with `names` a
+        fresh DNS lookup for every device (new records show without waiting for the daily refresh)."""
         self._force_sweep = True
         self._force_probe = self._force_probe or probe
+        self._force_names = self._force_names or names
 
     def _save(self) -> None:
         self._store.async_delay_save(self._stored, 10)
@@ -425,6 +428,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
         async with self._sweep_lock, self._scanning():
             self._force_sweep = False
+            refresh_names, self._force_names = self._force_names, False
             hosts = subnet_hosts(self.subnet)
             results = await async_multiping(
                 hosts, count=1, timeout=SWEEP_TIMEOUT, concurrent_tasks=128, privileged=self._privileged
@@ -478,7 +482,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             # Everything that answered or that the router has an address for, apart from the router.
             self.set_scan(phase="names", found=len((replied | set(mac_ip.values())) - {gateway}))
             await self._lookup_vendors()
-            await self._resolve_names(now)
+            await self._resolve_names(now, refresh=refresh_names)
             self._registry = registry_by_mac(self.hass)
             self._own_entities = {}
             for mac, info in self._registry.items():
@@ -642,8 +646,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             mac = rec["mac"]
             rec["vendor"] = None if is_random_mac(mac) else pretty_vendor(aiooui.get_vendor(mac[:8].upper()))
 
-    async def _resolve_names(self, now: datetime) -> None:
-        """Reverse DNS, then Bonjour, for devices we have no recent hostname for."""
+    async def _resolve_names(self, now: datetime, refresh: bool = False) -> None:
+        """Reverse DNS, then Bonjour, for devices we have no recent hostname for (every device when
+        `refresh` is set: a scan asked for by hand)."""
         todo = []
         for key, rec in self._seen.items():
             ip = rec.get("ip")
@@ -651,7 +656,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if not ip:
                 continue
             fresh = rec.get("dns_version") == NAME_LOOKUP_VERSION
-            if fresh and checked and now - datetime.fromisoformat(checked) < DNS_REFRESH:
+            if not refresh and fresh and checked and now - datetime.fromisoformat(checked) < DNS_REFRESH:
                 continue
             todo.append((key, ip))
         sem = asyncio.Semaphore(16)
