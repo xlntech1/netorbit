@@ -53,9 +53,11 @@ DEVICE_LIST = vol.All(cv.ensure_list, [cv.string])
 # Free text per hub or device: {label: value}; a null or empty value removes that label.
 FIELDS = vol.Schema({cv.string: vol.Any(None, cv.string)})
 # "Managed by", extra fields, linked sensors and alerts, accepted by update_device and update_hub.
+# Port alerts: "any", or a list of ports (an empty list turns them off).
+NOTIFY_PORTS = vol.Any("any", vol.All(cv.ensure_list, [vol.Any("any", vol.Coerce(int))]))
 TEXT_FIELDS = {vol.Optional("managed_by"): cv.string, vol.Optional("fields"): FIELDS,
                vol.Optional("entities"): vol.Schema({cv.string: vol.Any(None, "", cv.entity_id)}),
-               vol.Optional("notify"): cv.boolean}
+               vol.Optional("notify"): cv.boolean, vol.Optional("notify_ports"): NOTIFY_PORTS}
 
 SCHEMAS: dict[str, vol.Schema] = {
     SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
@@ -123,11 +125,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         SERVICE_IMPORT: lambda e, c, a: actions.import_config(hass, e, c, a["data"], a["replace"]),
         SERVICE_UPDATE_HUB: lambda e, c, a: actions.update_hub(hass, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent"),
                                                                 managed_by=a.get("managed_by"), fields=a.get("fields"), entities=a.get("entities"),
-                                                                notify=a.get("notify")),
+                                                                notify=a.get("notify"), notify_ports=a.get("notify_ports")),
         SERVICE_UPDATE_DEVICE: lambda e, c, a: actions.update_device(hass, e, c, a["device"], name=a.get("name"), icon=a.get("icon"),
                                                                       sleepy=a.get("sleepy"), hub=a.get("hub"),
                                                                       managed_by=a.get("managed_by"), fields=a.get("fields"), entities=a.get("entities"),
-                                                                      notify=a.get("notify")),
+                                                                      notify=a.get("notify"), notify_ports=a.get("notify_ports")),
         SERVICE_IMPORT_LIST: lambda e, c, a: actions.import_list(hass, e, c, a["hub"], a["text"], a["add_missing"]),
         SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name"), a.get("assign")),
         SERVICE_DISMISS_HUB: lambda e, c, a: actions.dismiss_hub(hass, e, c, a["device"]),

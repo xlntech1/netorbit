@@ -912,6 +912,60 @@ async def test_offline_and_online_alerts(hass: HomeAssistant, fake_net, freezer:
     assert _node_states(hass)["Device 53:0B"].attributes["notify"] is True
 
 
+async def test_port_change_alerts(hass: HomeAssistant, fake_net) -> None:
+    """netorbit_port_changed for the picked ports (or any), never for the first scan of a node."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    fake_net.ports = {"192.0.2.11": {22, 80}}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    events = async_capture_events(hass, "netorbit_port_changed")
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify_ports": [80, 443]}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["notify_ports"] == [80, 443]
+
+    # First scan: a baseline, no events even though 80 is "new".
+    await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True)
+    await hass.async_block_till_done()
+    assert events == []
+    # 80 closes and 443 opens: both picked. 8123 opens too: not picked, no event.
+    fake_net.ports["192.0.2.11"] = {22, 443, 8123}
+    await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True)
+    await hass.async_block_till_done()
+    assert sorted((e.data["port"], e.data["state"]) for e in events) == [(80, "closed"), (443, "open")]
+    assert events[0].data["name"] == "Device 53:0B" and events[0].data["service"] in ("http", "https") and events[0].data["since"]
+    # "any" also reports ports never seen before; an empty list turns alerts off.
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify_ports": "any"}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["notify_ports"] == "any"
+    events.clear()
+    fake_net.ports["192.0.2.11"] = {22, 443, 8123, 5900}
+    await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True)
+    await hass.async_block_till_done()
+    assert [(e.data["port"], e.data["state"]) for e in events] == [(5900, "open")]
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify_ports": []}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["notify_ports"] is None
+    events.clear()
+    fake_net.ports["192.0.2.11"] = {22}
+    await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True)
+    await hass.async_block_till_done()
+    assert events == []
+    # A bad list is refused; the options flow points at the right box.
+    with pytest.raises(Exception, match="port"):
+        await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "notify_ports": [70000]}, blocking=True)
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "edit_device"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"device": MAC_B})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"hub": "gateway", "sleepy": False, "notify": True, "notify_ports_text": "22, nope"})
+    assert flow["type"] is FlowResultType.FORM and flow["errors"] == {"notify_ports_text": "bad_ports"}
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"hub": "gateway", "sleepy": False, "notify": True, "notify_ports_text": "22, 443"})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["notify"] is True and dev.attributes["notify_ports"] == [22, 443]
+
+
 async def test_port_scan(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
     """Port discovery runs on its schedule, on demand, remembers ports that closed, and is settable in the options flow."""
     fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}

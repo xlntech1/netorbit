@@ -78,13 +78,20 @@ def test_hub_names_made_up_or_chosen():
     assert by_id[chosen["hub"]]["managed_by"] == "Router" and by_id[chosen["hub"]]["fields"] == {"Rack": "2"}
 
 
-def test_set_notify() -> None:
-    from custom_components.netorbit.manage import set_notify
+def test_set_notify_and_ports() -> None:
+    from custom_components.netorbit.manage import ManageError, normalize_notify_ports, set_notify
 
+    assert normalize_notify_ports(None) is None and normalize_notify_ports("") is None and normalize_notify_ports([]) is None
+    assert normalize_notify_ports("any") == "any" and normalize_notify_ports(["22", "any"]) == "any"
+    assert normalize_notify_ports("443, 22;22") == [22, 443]
+    assert normalize_notify_ports([8123, 22]) == [22, 8123]
+    for bad in ("22,x", [0], [70000], {"a": 1}):
+        with pytest.raises(ManageError):
+            normalize_notify_ports(bad)
     cfg: dict = {}
-    set_notify(cfg, True)
-    assert cfg == {"notify": True}
-    set_notify(cfg, None)
-    assert cfg == {"notify": True}
-    set_notify(cfg, False)
+    set_notify(cfg, True, [443, 22])
+    assert cfg == {"notify": True, "notify_ports": [22, 443]}
+    set_notify(cfg, None, "any")
+    assert cfg == {"notify": True, "notify_ports": "any"}
+    set_notify(cfg, False, [])
     assert cfg == {}

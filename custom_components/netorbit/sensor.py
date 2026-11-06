@@ -127,6 +127,7 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "wireless": node.wireless,
             "linked_entities": node.entities,
             "notify": node.notify,
+            "notify_ports": node.notify_ports,
             "throughput": node.throughput,
             "ports": [p["port"] for p in node.ports],
             "ports_named": [_port_label(p) for p in node.ports],

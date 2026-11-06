@@ -101,13 +101,15 @@
           "parent": "Connected to",
           "managed_by": "Managed by (optional)",
           "fields_text": "Extra fields (optional)",
-          "notify": "Notify when it goes offline or comes back"
+          "notify": "Notify when it goes offline or comes back",
+          "notify_ports_text": "Port alerts (optional)"
         },
         "data_description": {
           "host": "Leave empty for unmanaged switches with no IP. Hubs with an IP are pinged like devices.",
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
           "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
-          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications."
+          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications.",
+          "notify_ports_text": "any, or ports separated by commas, such as 22, 443. Fires netorbit_port_changed when one of them opens or closes at a port scan; any also tells you about a port never seen before."
         }
       },
       "edit_hub": {
@@ -126,12 +128,14 @@
           "remove": "Remove this hub",
           "managed_by": "Managed by (optional)",
           "fields_text": "Extra fields (optional)",
-          "notify": "Notify when it goes offline or comes back"
+          "notify": "Notify when it goes offline or comes back",
+          "notify_ports_text": "Port alerts (optional)"
         },
         "data_description": {
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
           "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
-          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications."
+          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications.",
+          "notify_ports_text": "any, or ports separated by commas, such as 22, 443. Fires netorbit_port_changed when one of them opens or closes at a port scan; any also tells you about a port never seen before."
         }
       },
       "add_device": {
@@ -148,14 +152,16 @@
           "fields_text": "Extra fields (optional)",
           "signal_entity": "Signal sensor (optional)",
           "lqi_entity": "Link quality (LQI) sensor (optional)",
-          "notify": "Notify when it goes offline or comes back"
+          "notify": "Notify when it goes offline or comes back",
+          "notify_ports_text": "Port alerts (optional)"
         },
         "data_description": {
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
           "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
           "signal_entity": "Only when NetOrbit does not find this device's own signal sensor, or picks the wrong one: the companion app's Wi-Fi sensors on a phone, say.",
           "lqi_entity": "A Zigbee link quality sensor (0-255) to show for this device.",
-          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications."
+          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications.",
+          "notify_ports_text": "any, or ports separated by commas, such as 22, 443. Fires netorbit_port_changed when one of them opens or closes at a port scan; any also tells you about a port never seen before."
         }
       },
       "edit_device": {
@@ -177,14 +183,16 @@
           "fields_text": "Extra fields (optional)",
           "signal_entity": "Signal sensor (optional)",
           "lqi_entity": "Link quality (LQI) sensor (optional)",
-          "notify": "Notify when it goes offline or comes back"
+          "notify": "Notify when it goes offline or comes back",
+          "notify_ports_text": "Port alerts (optional)"
         },
         "data_description": {
           "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
           "fields_text": "One per line, as Label: value. Shown when you tap the device on the map.",
           "signal_entity": "Only when NetOrbit does not find this device's own signal sensor, or picks the wrong one: the companion app's Wi-Fi sensors on a phone, say.",
           "lqi_entity": "A Zigbee link quality sensor (0-255) to show for this device.",
-          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications."
+          "notify": "Fires netorbit_device_offline after the number of missed ping rounds set under Settings, and netorbit_device_online when it answers again. The bundled blueprint turns these into phone notifications.",
+          "notify_ports_text": "any, or ports separated by commas, such as 22, 443. Fires netorbit_port_changed when one of them opens or closes at a port scan; any also tells you about a port never seen before."
         }
       },
       "review_new": {
@@ -566,6 +574,10 @@
         "notify": {
           "name": "Offline alerts",
           "description": "Fire netorbit_device_offline and netorbit_device_online for this one."
+        },
+        "notify_ports": {
+          "name": "Port alerts",
+          "description": "A list of ports, or \"any\". Fires netorbit_port_changed when one of them opens or closes. An empty list turns it off."
         }
       }
     },
@@ -640,6 +652,10 @@
         "notify": {
           "name": "Offline alerts",
           "description": "Fire netorbit_device_offline and netorbit_device_online for this one."
+        },
+        "notify_ports": {
+          "name": "Port alerts",
+          "description": "A list of ports, or \"any\". Fires netorbit_port_changed when one of them opens or closes. An empty list turns it off."
         }
       }
     },

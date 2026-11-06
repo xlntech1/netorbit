@@ -2,7 +2,8 @@ blueprint:
   name: NetOrbit - alerts for the devices you flagged
   description: >
     Sends a notification when a hub or device you flagged in NetOrbit goes offline
-    (after the number of missed ping rounds set under Settings) and when it comes back.
+    (after the number of missed ping rounds set under Settings), when it comes back,
+    and when one of the ports you chose for it opens or closes.
   domain: automation
   source_url: https://github.com/the-scott-davis/netorbit/blob/main/blueprints/automation/netorbit/device_alerts_notify.yaml
   input:
@@ -17,6 +18,12 @@ blueprint:
       default: true
       selector:
         boolean:
+    notify_ports:
+      name: Include port changes
+      description: Ports you picked under "Port alerts" on the device, or any change when you picked "any".
+      default: true
+      selector:
+        boolean:
 
 mode: queued
 max: 50
@@ -28,6 +35,9 @@ triggers:
   - trigger: event
     event_type: netorbit_device_online
     id: online
+  - trigger: event
+    event_type: netorbit_port_changed
+    id: port
 
 conditions:
   - condition: or
@@ -40,12 +50,18 @@ conditions:
             id: online
           - condition: template
             value_template: !input notify_online
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: port
+          - condition: template
+            value_template: !input notify_ports
 
 actions:
   - domain: mobile_app
     type: notify
     device_id: !input notify_device
     title: >-
-      {{ trigger.event.data.name }} {{ 'is offline' if trigger.id == 'offline' else 'is back online' }}
+      {% if trigger.id == 'port' %}{{ trigger.event.data.name }}: port {{ trigger.event.data.port }} {{ trigger.event.data.state }}{% else %}{{ trigger.event.data.name }} {{ 'is offline' if trigger.id == 'offline' else 'is back online' }}{% endif %}
     message: >-
-      {% if trigger.id == 'offline' %}Not answering since {{ as_timestamp(trigger.event.data.last_seen, 0) | timestamp_custom('%a %-I:%M %p') if trigger.event.data.last_seen else 'it was added' }}.{% else %}Answering again{% endif %}{% if trigger.event.data.ip %} ({{ trigger.event.data.ip }}){% endif %}
+      {% if trigger.id == 'port' %}{{ trigger.event.data.service or 'tcp' }}/{{ trigger.event.data.port }} is now {{ trigger.event.data.state }}{% elif trigger.id == 'offline' %}Not answering since {{ as_timestamp(trigger.event.data.last_seen, 0) | timestamp_custom('%a %-I:%M %p') if trigger.event.data.last_seen else 'it was added' }}.{% else %}Answering again{% endif %}{% if trigger.event.data.ip %} ({{ trigger.event.data.ip }}){% endif %}

@@ -166,14 +166,15 @@ def _tools() -> list[llm.Tool]:
             "netorbit_update_hub",
             "Rename a hub, change its type, or change which hub it connects to. managed_by is free text (a URL or the "
             "name of the thing that manages it); fields is {label: value} of extra notes, an empty value removes a label. "
-            "notify turns offline/online alerts on or off.",
+            "notify turns offline/online alerts on or off; notify_ports is 'any' or a list of ports whose changes alert.",
             vol.Schema({vol.Required("hub"): cv.string, vol.Optional("name"): cv.string,
                         vol.Optional("type"): hub_type, vol.Optional("parent"): cv.string,
                         vol.Optional("managed_by"): cv.string, vol.Optional("fields"): {cv.string: vol.Any(None, cv.string)},
-                        vol.Optional("entities"): {cv.string: vol.Any(None, cv.string)}, vol.Optional("notify"): cv.boolean}),
+                        vol.Optional("entities"): {cv.string: vol.Any(None, cv.string)}, vol.Optional("notify"): cv.boolean,
+                        vol.Optional("notify_ports"): vol.Any("any", [vol.Coerce(int)])}),
             lambda h, e, c, a: actions.update_hub(h, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent"),
                                                   managed_by=a.get("managed_by"), fields=a.get("fields"), entities=a.get("entities"),
-                                                  notify=a.get("notify")),
+                                                  notify=a.get("notify"), notify_ports=a.get("notify_ports")),
         ),
         _Tool(
             "netorbit_remove_hub",
@@ -199,14 +200,16 @@ def _tools() -> list[llm.Tool]:
             "Rename a device, set its icon (mdi:...), or mark it as allowed to sleep (no offline alerts). managed_by is "
             "free text (a URL or the name of the thing that manages it); fields is {label: value} of extra notes, an "
             "empty value removes a label. entities links sensors to read radio details from, by role (signal, lqi, "
-            "quality, ssid, bssid, channel), e.g. {signal: sensor.plug_rssi}. notify turns offline/online alerts on or off.",
+            "quality, ssid, bssid, channel), e.g. {signal: sensor.plug_rssi}. notify turns offline/online alerts on or off; "
+            "notify_ports is 'any' or a list of ports whose open/closed changes alert (an empty list turns that off).",
             vol.Schema({vol.Required("device"): cv.string, vol.Optional("name"): cv.string,
                         vol.Optional("icon"): cv.string, vol.Optional("allowed_to_sleep"): cv.boolean,
                         vol.Optional("managed_by"): cv.string, vol.Optional("fields"): {cv.string: vol.Any(None, cv.string)},
-                        vol.Optional("entities"): {cv.string: vol.Any(None, cv.string)}, vol.Optional("notify"): cv.boolean}),
+                        vol.Optional("entities"): {cv.string: vol.Any(None, cv.string)}, vol.Optional("notify"): cv.boolean,
+                        vol.Optional("notify_ports"): vol.Any("any", [vol.Coerce(int)])}),
             lambda h, e, c, a: actions.update_device(h, e, c, a["device"], a.get("name"), a.get("icon"), a.get("allowed_to_sleep"),
                                                      managed_by=a.get("managed_by"), fields=a.get("fields"), entities=a.get("entities"),
-                                                     notify=a.get("notify")),
+                                                     notify=a.get("notify"), notify_ports=a.get("notify_ports")),
         ),
         _Tool(
             "netorbit_ignore_device",

@@ -53,6 +53,7 @@ DEFAULT_PREFER_DNS: Final = False
 DEFAULT_WEAK_AFTER: Final = 10
 # Alerts: a flagged node is offline after this many missed ping rounds in a row.
 DEFAULT_OFFLINE_AFTER: Final = 3
+NOTIFY_ANY: Final = "any"  # notify_ports value meaning every port change, new ports included
 # Read every switch's port counters each round for traffic on the links (three short SNMP walks per switch).
 DEFAULT_PORT_COUNTERS: Final = True
 # Port discovery: automatic scans are off until someone turns them on (security software may flag the connects);
@@ -113,6 +114,7 @@ EVENT_INTERNET_DOWN: Final = f"{DOMAIN}_internet_down"
 EVENT_INTERNET_UP: Final = f"{DOMAIN}_internet_up"
 EVENT_DEVICE_OFFLINE: Final = f"{DOMAIN}_device_offline"
 EVENT_DEVICE_ONLINE: Final = f"{DOMAIN}_device_online"
+EVENT_PORT_CHANGED: Final = f"{DOMAIN}_port_changed"
 
 # Internet check: big public DNS resolvers that answer pings. Down means none answer for
 # INTERNET_DOWN_AFTER ping rounds in a row while the router still answers.

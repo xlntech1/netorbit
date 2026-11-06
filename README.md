@@ -177,7 +177,7 @@ Under the integration's **Configure** menu:
 | Review suggested hubs | Confirm or dismiss everything NetOrbit thinks might be network gear. |
 | Paste a client list | Paste a client list from an access point, app or switch, pick the hub, and every device in it is placed there. |
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
-| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, linked signal sensors, offline alerts, stop tracking. |
+| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, linked signal sensors, offline and port alerts, stop tracking. |
 | Settings → Weak signal after | Minutes a device's signal must read below good (−80 dBm, LQI 80) before the map draws it yellow-green, between online and seen-recently; the clock only stops once it reads clearly good again (−75 dBm, LQI 100), so a device hovering at the threshold counts. 10 by default; 0 never colours it. |
 | Settings → Read port counters for traffic | With SNMP on, read every managed switch's port counters each ping round for traffic on the links. On by default; off keeps the MAC tables and skips the counters. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
@@ -191,7 +191,7 @@ Under the integration's **Configure** menu:
 **Prefer DNS and Bonjour names** (off by default) puts the name your network gives a device first, before what other integrations call it, and uses it for hubs NetOrbit named itself, such as *Router*. Anything you renamed yourself keeps your name.
 
 
-**Alerts per hub or device** (off by default). Tap a node, *Edit*, and tick *Notify when it goes offline or comes back*: NetOrbit fires `netorbit_device_offline` once it has missed the number of ping rounds set under **Settings > Offline after** (3 by default, so one dropped Wi-Fi packet never pages you) and `netorbit_device_online` when it answers again. The bundled blueprint *Alerts for the devices you flagged* turns both into phone notifications. The older stale and recovered events are unchanged and still cover every device.
+**Alerts per hub or device** (off by default). Tap a node, *Edit*, and tick *Notify when it goes offline or comes back*: NetOrbit fires `netorbit_device_offline` once it has missed the number of ping rounds set under **Settings > Offline after** (3 by default, so one dropped Wi-Fi packet never pages you) and `netorbit_device_online` when it answers again. *Port alerts* picks ports from the last scans (or *any*): `netorbit_port_changed` fires when one of them opens or closes, and with *any* also for a port never seen before. The bundled blueprint *Alerts for the devices you flagged* turns all three into phone notifications. The older stale and recovered events are unchanged and still cover every device.
 
 **Traffic on the links.** With SNMP on, NetOrbit reads every managed switch's port counters each ping round (IF-MIB `ifHCInOctets` / `ifHCOutOctets` and `ifHighSpeed`; two readings a round apart give bits per second) and the MAC tables say which port each device sits on. A device alone on a port gets that port's rate; a hub on a port (an access point, a downstream switch) gets the port's rate as the traffic of everything behind it; a switch gets its own uplink port; Wi-Fi clients get their rate from the Wi-Fi controller instead (the FortiGate reports per-station bandwidth and PHY rate). On the map a busier link is a wider line (log scale: 1 Mbit/s a little wider, 1 Gbit/s about three times), a port past 70% of its speed gets a dashed amber line on top (red past 90%), the header names the busiest device, and the tooltip and popup show *12.4 Mbit/s down · 812 kbit/s up · 1% of 1 Gbit/s*. The `throughput` attribute (`in_bps`, `out_bps` from the device's side, `speed_mbps`, `utilization`, `source`, `at`) carries it for automations; `show_traffic: false` on a card turns the widths off. The first round after a start shows nothing; a counter that went backwards (a reboot) is skipped for one round.
 
@@ -273,6 +273,7 @@ Hover a device for a summary. Tap a hub or device for its details: DNS name, add
 | `netorbit_internet_up` | `since` |
 | `netorbit_device_offline` | `name`, `ip`, `mac`, `kind`, `last_seen`, `hub`, `missed_rounds` (only for hubs and devices with *Offline alerts* on) |
 | `netorbit_device_online` | `name`, `ip`, `mac`, `kind`, `last_seen`, `hub` |
+| `netorbit_port_changed` | `name`, `ip`, `mac`, `kind`, `port`, `service`, `state` (`open` or `closed`), `since` (only for the ports picked under *Port alerts*) |
 
 Every service returns a response describing what it did. Devices can be given by name, IP or MAC; hubs by name or id.
 
@@ -282,12 +283,12 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.reset_placement` | `device` |
 | `netorbit.import_client_list` | `hub`, `text`, `add_missing` |
 | `netorbit.add_hub` | `name` or `device`, `type`, `parent`, `ip`, `mac` |
-| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields`, `entities`, `notify` |
+| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields`, `entities`, `notify`, `notify_ports` |
 | `netorbit.remove_hub` | `hub` |
 | `netorbit.confirm_hub` | `device`, `type`, `name` |
 | `netorbit.dismiss_hub` | `device` |
 | `netorbit.track_device` | `mac` or `ip`, `name`, `icon`, `hub`, `sleepy` |
-| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label), `entities` (`{signal: sensor.x, lqi: sensor.y}`, roles signal, lqi, quality, ssid, bssid, channel), `notify` |
+| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label), `entities` (`{signal: sensor.x, lqi: sensor.y}`, roles signal, lqi, quality, ssid, bssid, channel), `notify`, `notify_ports` (a list of ports or `any`; an empty list turns it off) |
 | `netorbit.export_config` | none (returns your settings, keyed by MAC) |
 | `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |
@@ -296,7 +297,7 @@ Every service returns a response describing what it did. Devices can be given by
 
 ### Blueprints
 
-- [Alerts for the devices you flagged](blueprints/automation/netorbit/device_alerts_notify.yaml): offline and back online, for hubs and devices with alerts turned on
+- [Alerts for the devices you flagged](blueprints/automation/netorbit/device_alerts_notify.yaml): offline, back online, and port changes, for hubs and devices with alerts turned on
 - [Notify when a device goes offline](blueprints/automation/netorbit/device_offline_notify.yaml)
 - [Notify when a new device joins](blueprints/automation/netorbit/new_device_notify.yaml)
 

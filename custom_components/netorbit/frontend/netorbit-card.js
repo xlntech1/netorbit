@@ -122,6 +122,13 @@ function noParseFields(text) {
 
 const NO_RADIO = { wifi: "Wi-Fi", zigbee: "Zigbee", zwave: "Z-Wave", thread: "Thread", bluetooth: "Bluetooth", other: "Radio" };
 
+// What a node's port alerts are set to, in words: "off", "any port", or the ports.
+function noNotifySummary(value) {
+  if (!value || (Array.isArray(value) && !value.length)) return "off";
+  if (value === "any") return "any port";
+  return [].concat(value).map(Number).filter(Number.isFinite).sort((a, b) => a - b).join(", ") || "off";
+}
+
 // One line about a node's radio link: "Wi-Fi · Den AP · IoT · 5 GHz ch 44 · −61 dBm · SNR 37", or "Zigbee · LQI 212 · −58 dBm".
 function noWirelessLine(w) {
   if (!w) return "";
@@ -1147,7 +1154,7 @@ class NetOrbitCard extends HTMLElement {
         hub_type: a.hub_type, hostname: a.hostname, vendor: a.vendor, placement: a.placement, icon,
         fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {}, first_seen: a.first_seen,
         wireless: a.wireless || null, entities: a.linked_entities || null,
-        notify: a.notify === true,
+        notify: a.notify === true, notify_ports: a.notify_ports || null,
         throughput: cfg.show_traffic === false ? null : a.throughput || null,
         ports: a.ports_named || [], ports_closed: a.ports_closed || [], ports_checked: a.ports_checked,
         status: NO_STATUS[s.state] ? s.state : "unknown",
@@ -1160,7 +1167,7 @@ class NetOrbitCard extends HTMLElement {
         else { n.link = n.parent = opt.link; n.placement = "manual"; n.pending = true; }
       }
       // Free text is only shown in the details popup, but it is part of the signature so a saved edit redraws.
-      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields), noWirelessSig(n.wireless), n.notify ? 1 : 0, noTrafficSig(n.throughput), n.ports.join(","), n.ports_closed.join(","), n.ports_checked || ""].join("~"));
+      sig.push([n.key, n.status, n.link, n.label, n.mac, icon, n.sleepy ? 1 : 0, n.placement, n.pending ? 1 : 0, n.fqdn || "", n.managed_by || "", JSON.stringify(n.fields), noWirelessSig(n.wireless), n.notify ? 1 : 0, JSON.stringify(n.notify_ports), noTrafficSig(n.throughput), n.ports.join(","), n.ports_closed.join(","), n.ports_checked || ""].join("~"));
       if (a.kind === "hub") {
         hubs[n.key] = n;
         if (!n.link && !root) root = n.key;
@@ -1364,6 +1371,8 @@ class NetOrbitCard extends HTMLElement {
   .pop .small { font-size:11.5px; margin-top:5px; }
   .pop .chk { display:flex; align-items:center; gap:8px; margin-top:8px; color:#e2e8f0; font-size:12.5px; cursor:pointer; }
   .pop .chk input { width:auto; margin:0; accent-color:#2563eb; }
+  .pop .pgrid { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; margin-top:2px; }
+  .pop .pgrid .chk { margin-top:4px; font-size:12px; }
   .pop .ports { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
   .pop .pchip { font-size:11.5px; padding:2px 7px; border-radius:999px; background:rgba(52,211,153,.14); border:1px solid rgba(52,211,153,.35); color:#d1fae5; white-space:nowrap; }
   .pop .pchip i { font-style:normal; color:#94a3b8; margin-left:3px; }
@@ -2471,7 +2480,7 @@ class NetOrbitCard extends HTMLElement {
         ip: a.ip, mac: a.mac, hostname: a.hostname, vendor: a.vendor, fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {},
         first_seen: a.first_seen, last_seen: a.last_seen, ip_changes: a.ip_changes || 0, sleepy: a.sleepy === true,
         ports: a.ports_named || [], ports_closed: a.ports_closed || [], ports_checked: a.ports_checked,
-        notify: a.notify === true,
+        notify: a.notify === true, notify_ports: a.notify_ports || null,
         wireless: a.wireless || null, entities: a.linked_entities || null,
         status: NO_STATUS[live.state] ? live.state : "unknown",
       });
@@ -2500,7 +2509,7 @@ class NetOrbitCard extends HTMLElement {
       `<div class="kv">${row("DNS name", dns && dns !== n.label ? noEsc(dns) : "")}${row("IP", noEsc(n.ip))}${row("MAC", noEsc(n.mac))}${row("Maker", noEsc(n.vendor))}</div>` +
       `<div class="sec">Connection</div><div class="kv">${row("Via", noEsc(via))}${row("Signal", signalHtml)}${row("Traffic", n.throughput ? `${noEsc(noTrafficLine(n.throughput))}${n.throughput.source ? ` <span class="muted">from ${noEsc(String(n.throughput.source).startsWith("snmp:") ? "the switch port" : noSourceLabel(n.throughput.source))}</span>` : ""}` : "")}${n.kind === "device" ? row("Placed", noEsc(NO_PLACEMENT[n.placement] || n.placement || "")) : ""}</div>` +
       (managed || fields ? `<div class="sec">Fields</div><div class="kv">${row("Managed by", managed)}${fields}</div>` : "") +
-      (n.notify ? `<div class="sec">Alerts</div><div class="kv">${row("Offline", "notify when it goes offline or comes back")}</div>` : "") +
+      (n.notify || (n.notify_ports && n.notify_ports.length) ? `<div class="sec">Alerts</div><div class="kv">${row("Offline", n.notify ? "notify when it goes offline or comes back" : "")}${row("Ports", n.notify_ports ? noEsc(noNotifySummary(n.notify_ports)) : "")}</div>` : "") +
       portsHtml +
       `<div class="sec">History</div><div class="kv">${row("First seen", n.first_seen ? noEsc(noRel(n.first_seen)) : "")}${row("Last seen", n.status === "online" ? "now" : noEsc(noRel(n.last_seen)))}${n.ip_changes ? row("IP changes", String(n.ip_changes)) : ""}</div>` +
       `<div class="row">${admin ? `<button class="go ed">Edit</button>` : ""}${n.entity ? `<button class="info">More info</button>` : ""}<button class="x">Close</button></div>`;
@@ -2575,6 +2584,10 @@ class NetOrbitCard extends HTMLElement {
 
   _detailsEdit(n, ev, wrap, place, hubs, all, col) {
     const text = Object.entries(n.fields || {}).map(([k, v]) => `${k}: ${v}`).join("\n");
+    // Port alerts: every port seen on this node (open or closed since) plus whatever is picked already.
+    const picked = n.notify_ports === "any" ? [] : [].concat(n.notify_ports || []).map(Number);
+    const known = noPorts(n.ports, n.ports_closed);
+    const choices = known.concat(picked.filter((p) => !known.some((k) => k.port === p)).map((p) => ({ port: p, name: "", closed: false, gone: true })));
     const links = n.entities || {};
     // Sensors a person may want to link: anything in Home Assistant whose id or unit talks about a signal.
     const sensorOptions = (re, current) => {
@@ -2583,6 +2596,7 @@ class NetOrbitCard extends HTMLElement {
       if (current && !ids.includes(current)) ids.unshift(current);
       return `<option value="">none</option>` + ids.map((id) => `<option value="${noEsc(id)}" ${id === current ? "selected" : ""}>${noEsc((states[id] && states[id].attributes.friendly_name) || id)} (${noEsc(id)})</option>`).join("");
     };
+    const portBoxes = choices.map((p) => `<label class="chk"><input type="checkbox" class="np" value="${p.port}" ${picked.includes(p.port) ? "checked" : ""}> ${p.port}${p.name ? ` <span class="muted">${noEsc(p.name)}</span>` : ""}${p.gone ? ` <span class="muted">(not seen lately)</span>` : ""}</label>`).join("");
     const pop = this._openPop(
       `<b>Edit ${noEsc(n.label)}</b>` +
       `<label>Name<input class="name" ${n.kind === "device" ? `maxlength="${NO_NAME_MAX}" placeholder="Automatic name" ` : ""}value="${noEsc(n.label)}"></label>` +
@@ -2590,6 +2604,9 @@ class NetOrbitCard extends HTMLElement {
       `<label>Extra fields, one per line as Label: value<textarea class="fx" rows="4" placeholder="Location: Garage&#10;Serial: ABC123">${noEsc(text)}</textarea></label>` +
       `<div class="sec">Alerts</div>` +
       `<label class="chk"><input type="checkbox" class="nf" ${n.notify ? "checked" : ""}> Notify when it goes offline or comes back</label>` +
+      (n.kind === "radio" ? "" :
+        `<label class="chk"><input type="checkbox" class="npany" ${n.notify_ports === "any" ? "checked" : ""}> Notify about any port that opens, closes or appears</label>` +
+        (choices.length ? `<div class="muted small">or only these ports:</div><div class="pgrid">${portBoxes}</div>` : `<div class="muted small">Scan its ports first to pick single ports.</div>`)) +
       `<div class="sec">Signal</div>` +
       `<label>Signal sensor<select class="lse">${sensorOptions(/rssi|signal|dbm|wifi|wi_fi/i, links.signal)}</select></label>` +
       `<label>Link quality (LQI) sensor<select class="lle">${sensorOptions(/lqi|link_quality|linkquality/i, links.lqi)}</select></label>` +
@@ -2613,6 +2630,7 @@ class NetOrbitCard extends HTMLElement {
       const name = q(".name").value.trim().slice(0, NO_NAME_MAX);
       const renamed = name !== String(n.label || "").trim().slice(0, NO_NAME_MAX);
       data.notify = q(".nf").checked;
+      if (q(".npany")) data.notify_ports = q(".npany").checked ? "any" : [...pop.querySelectorAll(".np:checked")].map((b) => Number(b.value));
       const picks = { signal: q(".lse").value, lqi: q(".lle").value };
       if (picks.signal !== (links.signal || "") || picks.lqi !== (links.lqi || "")) data.entities = picks;
       if (n.kind === "hub") {
@@ -2625,6 +2643,9 @@ class NetOrbitCard extends HTMLElement {
       // one, and a name set in Home Assistant's entity settings (it wins on the map) changes too.
       if (n.kind === "device" && renamed) saved.then((ok) => ok && this._rename(n, name));
     });
+    // Picking "any" covers the single ports, so they grey out while it is on.
+    const syncAny = () => pop.querySelectorAll(".np").forEach((b) => { b.disabled = q(".npany").checked; });
+    if (q(".npany")) { q(".npany").addEventListener("change", syncAny); syncAny(); }
   }
 
   _summaryEntry() {
@@ -2655,5 +2676,5 @@ if (!window.customCards.find((c) => c.type === "netorbit-card")) {
     documentationURL: "https://github.com/the-scott-davis/netorbit",
   });
 }
-if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noPorts };
+if (typeof module !== "undefined") module.exports = { netorbitLayout, noGroupFor, noHeight, netorbitZoomView, netorbitScanMode, netorbitScanText, shareModel, netorbitShareSvg, netorbitDraw, netorbitRevealNode, netorbitRevealGlobal, noPartialPath, noShareType, noFramePump, noPrivateMac, noLink, noParseFields, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noPorts, noNotifySummary };
 console.info("%c NETORBIT %c " + NETORBIT_VERSION, "color:#0b1220;background:#34d399;font-weight:700", "color:#34d399");

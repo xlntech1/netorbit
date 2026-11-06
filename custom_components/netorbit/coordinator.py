@@ -66,6 +66,7 @@ from .const import (
     DOMAIN,
     EVENT_DEVICE_OFFLINE,
     EVENT_DEVICE_ONLINE,
+    EVENT_PORT_CHANGED,
     EVENT_DEVICE_RECOVERED,
     EVENT_DEVICE_STALE,
     EVENT_INTERNET_DOWN,
@@ -85,6 +86,7 @@ from .const import (
     PLACE_MANUAL,
     PLACE_NONE,
     PLACE_SNMP,
+    NOTIFY_ANY,
     PORTS_CLOSED_KEEP_DAYS,
     ROOT_HUB_ID,
     SNMP_DEFAULT_COMMUNITY,
@@ -165,6 +167,7 @@ class Node:
     wireless: dict[str, Any] | None = None  # radio details (see wireless/model.py), when any source has them
     entities: dict[str, str] | None = None  # entities a person linked by role: signal, lqi, ssid, ...
     notify: bool = False  # fire offline/online events for this node
+    notify_ports: list[int] | str | None = None  # ports whose open/closed changes fire an event, or "any"
     throughput: dict[str, Any] | None = None  # in_bps/out_bps (the device's view), speed_mbps, utilization, source, at (see traffic.py)
     ports: list[dict[str, Any]] = field(default_factory=list)  # open TCP ports: {port, name, first, last}
     ports_closed: list[dict[str, Any]] = field(default_factory=list)  # open at an earlier scan, closed now: {port, name, at}
@@ -1235,7 +1238,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=own.get("vendor"),
                 **manage.stored_text(hub),
                 wireless=self._mark_weak(key, self._wireless_for(hub.get("mac") or rec.get("mac"), hub), now), entities=hub.get("entities"),
-                notify=bool(hub.get("notify")),
+                notify=bool(hub.get("notify")), notify_ports=hub.get("notify_ports"),
                 throughput=self._throughput_for(key, hub.get("mac") or rec.get("mac"), hub["id"], now),
                 **self._port_fields(rec if rec.get("ports_checked") else own),
             )
@@ -1267,7 +1270,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
                 **manage.stored_text(cfg),
                 wireless=self._mark_weak(key, self._wireless_for(rec.get("mac") or cfg.get("mac"), cfg), now), entities=cfg.get("entities"),
-                notify=bool(cfg.get("notify")),
+                notify=bool(cfg.get("notify")), notify_ports=cfg.get("notify_ports"),
                 throughput=self._throughput_for(key, rec.get("mac") or cfg.get("mac"), None, now),
                 **self._port_fields(rec),
             )
@@ -1408,6 +1411,29 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     def _alert_payload(node: Node) -> dict[str, Any]:
         return {"name": node.name, "ip": node.ip, "mac": node.mac, "kind": node.kind, "last_seen": node.last_seen, "hub": node.link}
 
+    def _node_settings(self, key: str) -> dict[str, Any]:
+        """The person's settings for a node: the hub entry for hubs, the devices entry otherwise."""
+        if key.startswith("hub:"):
+            return next((h for h in self.opts[CONF_HUBS] if h["id"] == key[4:]), {})
+        return self.opts[CONF_DEVICES].get(key, {})
+
+    def _fire_port_changes(self, key: str, opened: set[int], closed: set[int], now: datetime) -> None:
+        """netorbit_port_changed for the ports a node's notify_ports picks ("any" = every change)."""
+        selected = self._node_settings(key).get("notify_ports")
+        if not selected:
+            return
+        node = self.data.nodes.get(key) if self.data else None
+        if node is None:
+            return
+        changes = {**{p: "open" for p in opened}, **{p: "closed" for p in closed}}
+        for port in sorted(changes):
+            if selected != NOTIFY_ANY and port not in selected:
+                continue
+            self.hass.bus.async_fire(EVENT_PORT_CHANGED, {
+                **self._alert_payload(node), "port": port, "service": service_name(port),
+                "state": changes[port], "since": now.isoformat(),
+            })
+
     # ----- wireless --------------------------------------------------------------
 
     def _wireless_for(self, mac: str | None, cfg: dict[str, Any]) -> dict[str, Any] | None:
@@ -1501,9 +1527,12 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                     continue
                 now = dt_util.utcnow()
                 rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
+                baseline = not rec.get("ports_checked")  # the first scan only records; nothing has "changed" yet
                 opened, closed = self._note_ports(rec, open_ports, ports, now)
                 if opened or closed:
                     _LOGGER.debug("Ports on %s: opened %s, closed %s", ip, sorted(opened), sorted(closed))
+                    if not baseline:
+                        self._fire_port_changes(key, opened, closed, now)
                 result[key] = sorted(open_ports)
             if keys is None:
                 self._port_round = dt_util.utcnow().isoformat()

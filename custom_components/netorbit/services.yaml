@@ -89,6 +89,7 @@ update_hub:
     managed_by: {example: "https://192.0.2.1", selector: {text: {}}}
     fields: {example: "{Location: Garage, Serial: ABC123}", selector: {object: {}}}
     notify: {selector: {boolean: {}}}
+    notify_ports: {example: "[22, 443]", selector: {object: {}}}
     entities: {example: "{signal: sensor.plug_rssi}", selector: {object: {}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
@@ -102,6 +103,7 @@ update_device:
     managed_by: {example: "Office switch", selector: {text: {}}}
     fields: {example: "{Owner: Jamie, Notes: spare}", selector: {object: {}}}
     notify: {selector: {boolean: {}}}
+    notify_ports: {example: "[22, 443]", selector: {object: {}}}
     entities: {example: "{signal: sensor.plug_rssi}", selector: {object: {}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 

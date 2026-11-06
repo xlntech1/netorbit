@@ -22,6 +22,7 @@ from .const import (
     MAX_FIELD_LABEL,
     MAX_FIELD_VALUE,
     MAX_FIELDS,
+    NOTIFY_ANY,
     ROOT_HUB_ID,
 )
 from .logic import slugify_id
@@ -84,13 +85,47 @@ def stored_text(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def set_notify(cfg: dict[str, Any], notify: bool | None = None) -> None:
-    """Turn the offline/online alerts of a hub or device on or off in place. None leaves them alone."""
+def normalize_notify_ports(value: Any) -> list[int] | str | None:
+    """'any', a list of ports, or text like '22, 443' -> 'any' | sorted ports | None (nothing selected)."""
+    if value is None or value is False or value == "":
+        return None
+    if isinstance(value, str):
+        if value.strip().lower() == NOTIFY_ANY:
+            return NOTIFY_ANY
+        value = value.replace(";", ",").split(",")
+    if not isinstance(value, (list, tuple, set)):
+        raise ManageError("Port alerts must be 'any' or a list of ports")
+    ports: set[int] = set()
+    for item in value:
+        text = str(item).strip()
+        if not text:
+            continue
+        if text.lower() == NOTIFY_ANY:
+            return NOTIFY_ANY
+        try:
+            port = int(text)
+        except ValueError as err:
+            raise ManageError(f"'{text}' is not a port") from err
+        if not 1 <= port <= 65535:
+            raise ManageError(f"{port} is not a port")
+        ports.add(port)
+    return sorted(ports) or None
+
+
+def set_notify(cfg: dict[str, Any], notify: bool | None = None, notify_ports: Any = None) -> None:
+    """Change the alert settings of a hub or device in place. None leaves a setting alone; False or an
+    empty list turns it off."""
     if notify is not None:
         if notify:
             cfg["notify"] = True
         else:
             cfg.pop("notify", None)
+    if notify_ports is not None:
+        selected = normalize_notify_ports(notify_ports)
+        if selected:
+            cfg["notify_ports"] = selected
+        else:
+            cfg.pop("notify_ports", None)
 
 
 def set_links(cfg: dict[str, Any], entities: Any) -> None:
@@ -233,7 +268,7 @@ def update_hub(opts: dict[str, Any], hub_id: str, **changes: Any) -> dict[str, A
         hub["parent"] = parent
         hub["parent_locked"] = True
     set_fields(hub, changes.get("managed_by"), changes.get("fields"))
-    set_notify(hub, changes.get("notify"))
+    set_notify(hub, changes.get("notify"), changes.get("notify_ports"))
     set_links(hub, changes.get("entities"))
     return {"hub": hub_id}
 

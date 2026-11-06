@@ -6,7 +6,7 @@ globalThis.HTMLElement = class {};
 globalThis.customElements = { get: () => undefined, define: (name, cls) => { globalThis.NetOrbitCard = cls; } };
 globalThis.window = globalThis;
 console.info = () => {};
-const { netorbitLayout, noPrivateMac, noPorts, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig } = require("../custom_components/netorbit/frontend/netorbit-card.js");
+const { netorbitLayout, noPrivateMac, noPorts, noWirelessLine, noSignalColor, noWirelessSig, noSourceLabel, noTone, noDur, noFmtBps, noTrafficLine, noLinkWidth, noTrafficSig, noNotifySummary } = require("../custom_components/netorbit/frontend/netorbit-card.js");
 
 function model(hubDefs, devCounts) {
   const hubs = {};
@@ -639,4 +639,11 @@ test("port chips: open ports first, closed ones after, names optional", () => {
   ]);
   assert.deepStrictEqual(noPorts(undefined, undefined), []);
   assert.deepStrictEqual(noPorts(["junk"], []), []);
+});
+
+test("port alert summary", () => {
+  assert.strictEqual(noNotifySummary(undefined), "off");
+  assert.strictEqual(noNotifySummary([]), "off");
+  assert.strictEqual(noNotifySummary("any"), "any port");
+  assert.strictEqual(noNotifySummary([443, 22]), "22, 443");
 });

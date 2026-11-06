@@ -45,6 +45,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
                     "wireless_source": ((node.wireless or {}).get("source") or "").split(":")[0] or None,
                     "linked_entities": len(node.entities or {}),
                     "notify": node.notify,
+                    "notify_ports": node.notify_ports if isinstance(node.notify_ports, str) else len(node.notify_ports or []),
                     "port_count": len(node.ports),
                 }
             )

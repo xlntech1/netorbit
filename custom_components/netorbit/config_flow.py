@@ -381,10 +381,10 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     try:
                         hub = manage.hub_by_id(self.opts, result["hub"])
                         manage.set_fields(hub, *_text_values(user_input))
-                        manage.set_notify(hub, bool(user_input.get("notify")))
+                        manage.set_notify(hub, *_notify_values(user_input))
                     except manage.ManageError:
                         self.opts[CONF_HUBS] = [h for h in self.opts[CONF_HUBS] if h["id"] != result["hub"]]
-                        errors["fields_text"] = "bad_fields"
+                        errors.update(_form_error(user_input))
                     else:
                         return self._save()
         return self.async_show_form(step_id="add_hub", data_schema=self._hub_schema({}, None, False), errors=errors)
@@ -416,11 +416,12 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     fields["parent"] = user_input["parent"]
                 try:
                     managed_by, new_fields = _text_values(user_input)
+                    notify, notify_ports = _notify_values(user_input)
                     # The form shows every field, so what comes back is the whole list: drop the rest.
                     fields["fields"] = {**{k: None for k in hub.get("fields") or {}}, **new_fields}
-                    manage.update_hub(self.opts, hub["id"], managed_by=managed_by, notify=bool(user_input.get("notify")), **fields)
+                    manage.update_hub(self.opts, hub["id"], managed_by=managed_by, notify=notify, notify_ports=notify_ports or [], **fields)
                 except manage.ManageError:
-                    errors["fields_text"] = "bad_fields"
+                    errors.update(_form_error(user_input))
                 else:
                     return self._save()
         schema = self._hub_schema(hub, hub["id"], root)
@@ -467,7 +468,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 try:
                     cleaned = _clean_device(user_input)
                 except manage.ManageError:
-                    errors["fields_text"] = "bad_fields"
+                    errors.update(_form_error(user_input))
                 else:
                     cfg = self.opts[CONF_DEVICES].setdefault(key, {})
                     cfg.update(cleaned)
@@ -513,7 +514,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
             try:
                 cleaned = _clean_device(user_input)
             except manage.ManageError:
-                errors["fields_text"] = "bad_fields"
+                errors.update(_form_error(user_input))
             else:
                 new_cfg = self.opts[CONF_DEVICES].setdefault(key, {})
                 new_cfg.update(cleaned)
@@ -618,7 +619,7 @@ def _clean_device(user_input: dict[str, Any]) -> dict[str, Any]:
         out["icon"] = user_input["icon"]
     managed_by, fields = _text_values(user_input)
     manage.set_fields(out, managed_by, fields)
-    manage.set_notify(out, bool(user_input.get("notify")))
+    manage.set_notify(out, *_notify_values(user_input))
     manage.set_links(out, {"signal": user_input.get("signal_entity") or "", "lqi": user_input.get("lqi_entity") or ""})
     return out
 
@@ -631,7 +632,28 @@ def _text_fields(cfg: dict[str, Any]) -> dict[Any, Any]:
             sel.TextSelectorConfig(multiline=True)
         ),
         vol.Required("notify", default=bool(cfg.get("notify"))): bool,
+        vol.Optional("notify_ports_text", description={"suggested_value": _notify_ports_text(cfg.get("notify_ports"))}): str,
     }
+
+
+def _notify_ports_text(value: Any) -> str | None:
+    if not value:
+        return None
+    return value if isinstance(value, str) else ", ".join(str(p) for p in value)
+
+
+def _notify_values(user_input: dict[str, Any]) -> tuple[bool, list[int] | str | None]:
+    """(notify, notify_ports) from the form. Raises ManageError on a bad port list."""
+    return bool(user_input.get("notify")), manage.normalize_notify_ports(user_input.get("notify_ports_text"))
+
+
+def _form_error(user_input: dict[str, Any]) -> dict[str, str]:
+    """Which box a ManageError from the free text or alert fields belongs to."""
+    try:
+        manage.normalize_notify_ports(user_input.get("notify_ports_text"))
+    except manage.ManageError:
+        return {"notify_ports_text": "bad_ports"}
+    return {"fields_text": "bad_fields"}
 
 
 def _text_values(user_input: dict[str, Any]) -> tuple[str, dict[str, str]]:

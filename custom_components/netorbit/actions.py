@@ -82,7 +82,7 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
             if node.kind == INTERNET_KEY:
                 continue
             extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn),
-                                       ("open_ports", [p["port"] for p in node.ports]), ("wireless", node.wireless), ("alerts", node.notify),
+                                       ("open_ports", [p["port"] for p in node.ports]), ("wireless", node.wireless), ("alerts", node.notify), ("port_alerts", node.notify_ports),
                                        ("throughput", node.throughput)) if v}
             if node.kind == "hub":
                 hubs.append({
@@ -243,6 +243,7 @@ async def update_device(
     hass, entry, coord, device: str, name: str | None = None, icon: str | None = None,
     sleepy: bool | None = None, hub: str | None = None, managed_by: str | None = None,
     fields: dict[str, Any] | None = None, entities: dict[str, Any] | None = None, notify: bool | None = None,
+    notify_ports: Any = None,
 ) -> dict[str, Any]:
     """Change what a person set on a device. An empty name or icon goes back to the discovered one."""
     key = coord.resolve_device(device)
@@ -264,7 +265,7 @@ async def update_device(
     if hub:
         manage.assign(opts, [key], _hub(coord, hub))
     manage.set_fields(cfg, managed_by, fields)
-    manage.set_notify(cfg, notify)
+    manage.set_notify(cfg, notify, notify_ports)
     manage.set_links(cfg, entities)
     if key in opts[CONF_IGNORED]:
         opts[CONF_IGNORED].remove(key)
@@ -297,8 +298,8 @@ EXPORT_VERSION = 1
 def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     """Everything a person has set up, keyed by MAC, so it can be backed up or moved."""
     opts = coord.opts
-    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields", "entities", "notify")
-    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields", "entities", "notify")
+    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields", "entities", "notify", "notify_ports")
+    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields", "entities", "notify", "notify_ports")
     return {
         "netorbit_export": EXPORT_VERSION,
         "hubs": [
