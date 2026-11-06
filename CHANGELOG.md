@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **The map no longer jumps down after a redraw**, such as the one closing a popup makes, when the header's icons take a moment to load. The header was laid out before its icons had a size, then wrapped onto a second line once they did, so a quick tap on the next hub could miss. Icons now hold their size from the first layout (#44).
+
 ## 0.3.0
 
 ### Added

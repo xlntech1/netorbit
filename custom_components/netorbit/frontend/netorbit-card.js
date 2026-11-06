@@ -1123,6 +1123,9 @@ class NetOrbitCard extends HTMLElement {
   .head { display:flex; flex-wrap:wrap; align-items:center; gap:10px 12px; padding:16px 18px 4px; }
   .title { font-size:20px; font-weight:600; margin-right:auto; display:flex; align-items:center; gap:8px; }
   .title ha-icon { --mdc-icon-size:22px; color:#60a5fa; }
+  /* Every icon holds its size from the first layout, before its picture arrives. Otherwise a redraw can lay the header
+     out without icons, then wrap it onto a second line when they appear, and the map jumps down under a finger. */
+  ha-icon { display:inline-flex; flex:none; width:var(--mdc-icon-size, 24px); height:var(--mdc-icon-size, 24px); }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:#cbd5e1; background:rgba(148,163,184,.08); border:1px solid rgba(148,163,184,.14); padding:4px 10px; border-radius:999px; font-variant-numeric:tabular-nums; }
   .chip i { width:8px; height:8px; border-radius:50%; display:inline-block; }
   .chip.sug { border-color:rgba(244,114,182,.5); color:#f9a8d4; }

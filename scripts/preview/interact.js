@@ -906,10 +906,9 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const c7 = hp.locator("netorbit-card");
     await c7.locator(".editbtn").click();
     const opts = async () => c7.locator(".pop select.parent option").evaluateAll((o) => o.map((x) => x.value).sort());
-    // Click a hub and wait for its popup. Right after a redraw (closing a popup redraws the map) the hub is still
-    // moving for a few frames, and a click that lands on it mid-move goes to the map behind it and opens nothing.
-    // So the click waits until the hub has held still for 5 frames, is made once, and the popup must follow it.
-    // There is no retry: a tap that opens nothing on a settled map is a failure.
+    // Click a hub and wait for its popup. A click that lands on a hub while it moves goes to the map behind it and
+    // opens nothing, so the click waits until the hub has held still for 5 frames, is made once, and the popup must
+    // follow it. There is no retry: a tap that opens nothing on a settled map is a failure.
     const openHub = async (key) => {
       const sel = `.node.hub[data-key="hub:${key}"] circle.disc`;
       await hp.evaluate((sel) => new Promise((resolve, reject) => {
@@ -933,7 +932,18 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     // The router has no parent to pick.
     await openHub("gateway");
     assert.strictEqual(await c7.locator(".pop select.parent").count(), 0, "the router has no Connected to picker");
-    await c7.locator(".pop .x").click();
+    // Closing a popup redraws the map, and the hubs must be where they will stay from that first layout on (#44).
+    // The header used to lay out without its icons, which load a moment later, then wrap onto a second line when
+    // they arrived, so the map jumped down under a quick tap on the next hub.
+    const [atRedraw, settled] = await hp.evaluate(async (sel) => {
+      const root = document.querySelector("netorbit-card").shadowRoot;
+      const pos = () => { const b = root.querySelector(sel).getBoundingClientRect(); return [b.x, b.y, b.width].map((v) => v.toFixed(2)).join(); };
+      root.querySelector(".pop .x").click();
+      const first = pos();
+      for (let i = 0; i < 5; i++) await new Promise((r) => requestAnimationFrame(r));
+      return [first, pos()];
+    }, '.node.hub[data-key="hub:core"] circle.disc');
+    assert.strictEqual(settled, atRedraw, "a hub does not move after the redraw that closing a popup makes");
     // A hub's own descendants are not offered, and neither is the hub itself.
     await openHub("core");
     assert.deepStrictEqual(await opts(), ["gateway"], "a switch is offered only hubs that are not below it");
