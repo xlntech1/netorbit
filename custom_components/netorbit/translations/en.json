@@ -222,7 +222,7 @@
           "remove": "Remove this controller"
         },
         "data_description": {
-          "name": "How the controller is shown on the map (the device's source line says \"from <name>\"). Empty uses the host.",
+          "name": "How the controller is named on the map: a device's source line says \"from\" and this name. Empty uses the host.",
           "host": "Address of the controller's management interface.",
           "port": "Its HTTPS API port (443 unless you changed it).",
           "verify_ssl": "Off for a controller with its factory certificate; turn on once it has a certificate your Home Assistant trusts.",

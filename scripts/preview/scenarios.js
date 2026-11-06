@@ -120,6 +120,7 @@
   (function () {
     const full = window.NETORBIT_SCENARIOS.full;
     const byLabel = (l) => Object.values(full).find((st) => st.attributes.label === l);
+    const scanned = new Date(Date.now() - 2 * 3600e3).toISOString(); // when the details below were last read
     Object.assign(byLabel("Router").attributes, { fqdn: "edge.home.example", hostname: "edge", managed_by: "ISP support, ticket 4471" });
     Object.assign(byLabel("Office Switch").attributes, { fqdn: "sw-office.home.example", hostname: "sw-office", fields: { Rack: "Office closet, shelf 2", Firmware: "7.5.15" } });
     Object.assign(byLabel("NAS").attributes, { fqdn: "nas.home.example", hostname: "nas", managed_by: "Office Switch", first_seen: new Date(Date.now() - 90 * 86400e3).toISOString(),
