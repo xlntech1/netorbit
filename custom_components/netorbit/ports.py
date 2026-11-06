@@ -51,7 +51,7 @@ EXTENDED_PORTS: dict[int, str] = {
     4200: "http-alt", 4369: "epmd", 4444: "http-alt", 4500: "ipsec-nat", 4567: "http-alt", 4662: "edonkey",
     4786: "cisco-smi", 4840: "opc-ua", 4848: "glassfish", 5006: "synology-ssl", 5009: "airport-admin",
     5010: "http-alt", 5050: "http-alt", 5080: "http-alt", 5222: "xmpp", 5223: "xmpp-ssl", 5269: "xmpp-server",
-    5353: "mdns", 5355: "llmnr", 5357: "wsd", 5431: "upnp-alt", 5443: "https-alt", 5500: "vnc-alt",
+    5353: "mdns", 5355: "llmnr", 5357: "wsd", 5380: "technitium", 5431: "upnp-alt", 5443: "https-alt", 5500: "vnc-alt",
     5555: "adb", 5601: "kibana", 5631: "pcanywhere", 5672: "amqp", 5683: "coap", 5800: "vnc-http",
     5901: "vnc-1", 5902: "vnc-2", 5938: "teamviewer", 5984: "couchdb", 5985: "winrm", 5986: "winrm-ssl",
     6000: "x11", 6001: "x11-1", 6053: "esphome", 6080: "novnc", 6082: "http-alt", 6346: "gnutella",

@@ -248,7 +248,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._force_sweep = False
         self._force_probe = False
         self._force_names = False
-        self._last_port_scan: datetime | None = None
+        self._last_port_scan: datetime | None = None  # when the last full round started (keeps rounds apart)
+        self._port_round: str | None = None  # when the last full round finished (persisted)
         self._force_port_scan = False
         self._port_scan_lock = asyncio.Lock()
         self._privileged: bool | None = None
@@ -291,10 +292,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         # The hub tree from the last sweep, so the map looks the same after a restart while the
         # first sweep is still running.
         self._topology = Topology(hub_parent=dict(data.get("hub_parent") or {}))
-        # The port scan schedule survives a restart: the newest scan on record counts as the last round.
-        stamps = [rec.get("ports_checked") for rec in self._seen.values() if rec.get("ports_checked")]
-        if stamps:
-            self._last_port_scan = datetime.fromisoformat(max(stamps))
+        # The port scan schedule survives a restart: the last full round is remembered. A device scanned by
+        # hand does not count, or "scan now" on one device would put the next round off for hours.
+        if data.get("port_round"):
+            self._last_port_scan = datetime.fromisoformat(data["port_round"])
         self._privileged = await self._detect_privileges()
 
     async def _detect_privileges(self) -> bool | None:
@@ -338,7 +339,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._store.async_delay_save(self._stored, 10)
 
     def _stored(self) -> dict[str, Any]:
-        return {"seen": self._seen, "initialized": self._initialized, "hub_parent": self._topology.hub_parent}
+        return {
+            "seen": self._seen, "initialized": self._initialized, "hub_parent": self._topology.hub_parent,
+            "port_round": self._port_round,
+        }
 
     async def async_shutdown(self) -> None:
         """Write what NetOrbit knows right away on unload, so a reload starts from it."""
@@ -1485,6 +1489,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 if opened or closed:
                     _LOGGER.debug("Ports on %s: opened %s, closed %s", ip, sorted(opened), sorted(closed))
                 result[key] = sorted(open_ports)
+            if keys is None:
+                self._port_round = dt_util.utcnow().isoformat()
             self._save()
         if result:
             self.async_rebuild()

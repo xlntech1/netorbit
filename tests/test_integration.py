@@ -992,6 +992,31 @@ async def test_port_scan(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeF
     assert dev.attributes["ports_named"] == ["22/ssh", "8123/home-assistant", "65000"] and dev.attributes["ports_closed"] == []
 
 
+async def test_hand_scans_do_not_postpone_the_round(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """The schedule remembers the last full round across a restart, not the newest scan of one device."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    fake_net.ports = {GATEWAY: {80}, "192.0.2.11": {22}}
+    entry = _entry("auto", port_scan_interval=6)
+    await _setup(hass, entry)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert len(fake_net.port_scans) == 2  # the first round, at setup
+
+    # An hour later someone scans one device by hand, then Home Assistant restarts an hour after that.
+    await _advance(hass, freezer, 3600)
+    await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True)
+    await _advance(hass, freezer, 3600)
+    fake_net.port_scans.clear()
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert fake_net.port_scans == []  # two hours since the last round: not due yet
+
+    # Six hours after the first round the next one runs, hand scan or not.
+    await _advance(hass, freezer, 4 * 3600 + 120)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert sorted(fake_net.port_scans) == sorted([GATEWAY, "192.0.2.11"])
+
+
 async def test_port_scan_is_off_by_default(hass: HomeAssistant, fake_net) -> None:
     fake_net.alive = {GATEWAY, "192.0.2.11"}
     fake_net.arp = {"192.0.2.11": MAC_B}

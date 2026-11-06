@@ -2462,6 +2462,21 @@ class NetOrbitCard extends HTMLElement {
   // `keep`: the state of the same popup before a redraw (see _detailsState), to open it again where it was.
   _detailsPopup(n, ev, wrap, place, hubs, all, col, keep = null) {
     const admin = this._isAdmin();
+    // The map is not redrawn while a popup is open or a finger is on it, so the node object can be older than
+    // its sensor (a port scan that just finished, a name that changed). The popup shows facts, so read them live.
+    const live = this._hass && n.entity && this._hass.states[n.entity];
+    if (live) {
+      const a = live.attributes;
+      Object.assign(n, {
+        ip: a.ip, mac: a.mac, hostname: a.hostname, vendor: a.vendor, fqdn: a.fqdn, managed_by: a.managed_by, fields: a.fields || {},
+        first_seen: a.first_seen, last_seen: a.last_seen, ip_changes: a.ip_changes || 0, sleepy: a.sleepy === true,
+        ports: a.ports_named || [], ports_closed: a.ports_closed || [], ports_checked: a.ports_checked,
+        notify: a.notify === true,
+        wireless: a.wireless || null, entities: a.linked_entities || null,
+        status: NO_STATUS[live.state] ? live.state : "unknown",
+      });
+      if (n.kind === "device" && !n.pending) n.placement = a.placement;
+    }
     const dns = n.fqdn || n.hostname;
     const via = n.kind === "hub" ? (hubs[n.parent] ? hubs[n.parent].label : "") : (hubs[n.link] && hubs[n.link].kind === "hub" ? hubs[n.link].label : "");
     const row = (k, v) => (v ? `<span class="k">${noEsc(k)}</span><span class="v">${v}</span>` : "");
@@ -2519,7 +2534,7 @@ class NetOrbitCard extends HTMLElement {
       link.style.pointerEvents = "none";
       const before = n.ports_checked;
       // The sensor updates a moment after the service answers; wait for it (briefly) so the popup shows the new list.
-      const fresh = () => { const st = this._hass && this._hass.states[n.entity]; return st && st.attributes.ports_checked !== before ? st.attributes : null; };
+      const fresh = () => { const st = this._hass && this._hass.states[n.entity]; return st && (st.attributes.ports_checked || null) !== (before || null) ? st.attributes : null; };
       const show = (a) => {
         if (a) Object.assign(n, { ports: a.ports_named || [], ports_closed: a.ports_closed || [], ports_checked: a.ports_checked });
         if (wrap.contains(pop)) this._detailsPopup(n, ev, wrap, place, hubs, all, col);
