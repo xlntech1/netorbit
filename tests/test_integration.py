@@ -212,6 +212,49 @@ async def test_device_mac_not_in_arp_still_answers(hass: HomeAssistant, fake_net
     assert _node_states(hass)["Garden Cam"].state == "online"
 
 
+async def test_replies_count_when_arp_has_no_entry(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """With no ARP entry for a pinged address (Home Assistant in a bridged container, gear on
+    another network), a reply counts as it did before the ARP check, even for a device and a hub
+    that ARP has already shown at their addresses."""
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.20"}
+    fake_net.arp = {"192.0.2.11": MAC_B, "192.0.2.20": MAC_C}
+    await _setup(hass, _entry("auto"))
+    await hass.services.async_call(
+        DOMAIN, "add_hub", {"name": "Hallway AP", "type": "access_point", "ip": "192.0.2.20", "mac": MAC_C}, blocking=True
+    )
+    await _advance(hass, freezer, 61)
+    names = ["Device 53:0B", "Hallway AP"]
+    assert [_node_states(hass)[n].state for n in names] == ["online", "online"]
+
+    # the ARP table empties: ping rounds and the next sweep find no entry to check against
+    fake_net.arp = {}
+    await _advance(hass, freezer, 61)
+    assert [_node_states(hass)[n].state for n in names] == ["online", "online"]
+    await _advance(hass, freezer, 301)
+    await _advance(hass, freezer, 25*3600)
+    assert [_node_states(hass)[n].state for n in names] == ["online", "online"]
+
+
+async def test_device_tracked_by_ip_only_still_answers(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """A device tracked by IP only has no MAC to hold a reply to, so it gets the credit whatever
+    MAC ARP shows at its address, until a sweep learns its MAC."""
+    fake_net.alive = {GATEWAY}
+    await _setup(hass, _entry("auto"))
+    await hass.services.async_call(DOMAIN, "track_device", {"ip": "192.0.2.40", "name": "Printer"}, blocking=True)
+
+    fake_net.alive.add("192.0.2.40")
+    fake_net.arp = {"192.0.2.40": MAC_C}
+    await _advance(hass, freezer, 61)
+    assert _node_states(hass)["Printer"].state == "online"
+    await _advance(hass, freezer, 61)
+    assert _node_states(hass)["Printer"].state == "online"
+    # the next sweep keys it by the MAC it found there, and it stays online under its name
+    await _advance(hass, freezer, 301)
+    await _advance(hass, freezer, 25*3600)
+    assert _node_states(hass)["Printer"].state == "online"
+    assert _node_states(hass)["Printer"].attributes["mac"].lower() == MAC_C
+
+
 async def test_addressless_hubs_follow_what_is_behind_them(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
     """Hubs with no address can't be pinged, so they take their status from the devices behind
     them (through other addressless hubs too) instead of turning stale once the window passes."""
