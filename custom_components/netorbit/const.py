@@ -31,6 +31,7 @@ CONF_PREFER_DNS: Final = "prefer_dns_names"
 CONF_WEAK_AFTER: Final = "weak_signal_minutes"
 CONF_OFFLINE_AFTER: Final = "offline_after_rounds"
 CONF_PORT_COUNTERS: Final = "port_counters"
+CONF_PORT_SCAN_AUTO: Final = "port_scan_auto"
 CONF_PORT_SCAN_INTERVAL: Final = "port_scan_interval"
 CONF_PORT_SCAN_PORTS: Final = "port_scan_ports"
 CONF_PORT_SCAN_CUSTOM: Final = "port_scan_custom"
@@ -54,8 +55,10 @@ DEFAULT_WEAK_AFTER: Final = 10
 DEFAULT_OFFLINE_AFTER: Final = 3
 # Read every switch's port counters each round for traffic on the links (three short SNMP walks per switch).
 DEFAULT_PORT_COUNTERS: Final = True
-# Port discovery: hours between TCP port scans of every online node, 0 = off.
-DEFAULT_PORT_SCAN_INTERVAL: Final = 0
+# Port discovery: automatic scans are off until someone turns them on (security software may flag the connects);
+# scans asked for by hand work either way. When on, every online node is scanned this many hours apart.
+DEFAULT_PORT_SCAN_AUTO: Final = False
+DEFAULT_PORT_SCAN_INTERVAL: Final = 24
 PORT_SET_COMMON: Final = "common"
 PORT_SET_EXTENDED: Final = "extended"
 PORT_SET_CUSTOM: Final = "custom"

@@ -37,6 +37,7 @@ from .const import (
     CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
     CONF_PORT_SCAN_CUSTOM,
+    CONF_PORT_SCAN_AUTO,
     CONF_PORT_SCAN_HUBS,
     CONF_PORT_SCAN_INTERVAL,
     CONF_PORT_SCAN_PORTS,
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_OFFLINE_AFTER,
     DEFAULT_PORT_COUNTERS,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_PORT_SCAN_AUTO,
     DEFAULT_PORT_SCAN_HUBS,
     DEFAULT_PORT_SCAN_INTERVAL,
     DEFAULT_PORT_SCAN_PORTS,
@@ -105,7 +107,7 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
-from .ports import ports_for, scan as scan_ports, service_name
+from .ports import ports_for, scan as scan_ports, service_name, warm_service_names
 from .snmp import SnmpClient
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
@@ -198,7 +200,11 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_WEAK_AFTER, DEFAULT_WEAK_AFTER)
     opts.setdefault(CONF_OFFLINE_AFTER, DEFAULT_OFFLINE_AFTER)
     opts.setdefault(CONF_PORT_COUNTERS, DEFAULT_PORT_COUNTERS)
-    opts.setdefault(CONF_PORT_SCAN_INTERVAL, DEFAULT_PORT_SCAN_INTERVAL)
+    if CONF_PORT_SCAN_AUTO not in opts:
+        # Settings saved before the switch existed: a number of hours meant on, 0 meant off.
+        opts[CONF_PORT_SCAN_AUTO] = bool(opts.get(CONF_PORT_SCAN_INTERVAL)) or DEFAULT_PORT_SCAN_AUTO
+    if not opts.get(CONF_PORT_SCAN_INTERVAL):
+        opts[CONF_PORT_SCAN_INTERVAL] = DEFAULT_PORT_SCAN_INTERVAL
     opts.setdefault(CONF_PORT_SCAN_PORTS, DEFAULT_PORT_SCAN_PORTS)
     opts.setdefault(CONF_PORT_SCAN_CUSTOM, "")
     opts.setdefault(CONF_PORT_SCAN_HUBS, DEFAULT_PORT_SCAN_HUBS)
@@ -252,6 +258,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         self._port_round: str | None = None  # when the last full round finished (persisted)
         self._force_port_scan = False
         self._port_scan_lock = asyncio.Lock()
+        self._hand_scan_lock = asyncio.Lock()  # scans asked for by hand run beside a background round, one at a time
+        self._warmed_ports: tuple[str, str] | None = None  # which port set's service names were looked up
         self._privileged: bool | None = None
         self._sweep_lock = asyncio.Lock()
         self._snmp = SnmpClient(hass)
@@ -325,7 +333,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             self._force_sweep = True
         if self.opts.get(CONF_WIFI_CONTROLLERS) != old_ctrl:
             self._ctrl_backoff.clear()  # a changed controller is asked again at once
-        if self.opts[CONF_PORT_SCAN_INTERVAL] and (self.opts[CONF_PORT_SCAN_PORTS], self.opts[CONF_PORT_SCAN_CUSTOM]) != old_ports:
+        if self.opts[CONF_PORT_SCAN_AUTO] and (self.opts[CONF_PORT_SCAN_PORTS], self.opts[CONF_PORT_SCAN_CUSTOM]) != old_ports:
             self._force_port_scan = True
 
     def request_sweep(self, probe: bool = False, names: bool = False) -> None:
@@ -420,6 +428,11 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if ip:
                 rec["ip"] = ip
         await self._poll_controllers(now)
+        chosen = (self.opts[CONF_PORT_SCAN_PORTS], self.opts.get(CONF_PORT_SCAN_CUSTOM) or "")
+        # Names for custom ports are looked up whether or not automatic scans are on: a scan by hand shows them too.
+        if self._warmed_ports != chosen:
+            await self.hass.async_add_executor_job(warm_service_names, ports_for(*chosen))
+            self._warmed_ports = chosen
         if self.opts[CONF_SNMP_ENABLED] and self.opts[CONF_PORT_COUNTERS] and self._tables:
             await self._read_counters(now)
         elif self._port_rates:
@@ -1434,8 +1447,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
     @callback
     def _maybe_scan_ports(self, now: datetime) -> None:
-        """Start the scheduled port scan in the background when it is due. Never two rounds at once."""
-        hours = self.opts[CONF_PORT_SCAN_INTERVAL]
+        """Start the scheduled port scan in the background when it is due. Never two rounds at once.
+
+        Without automatic scans only a round asked for by hand (request_port_scan) runs."""
+        hours = self.opts[CONF_PORT_SCAN_INTERVAL] if self.opts[CONF_PORT_SCAN_AUTO] else 0
         # The first ping round after setup only knows what was saved; a scheduled round waits for the sweep.
         if self._last_sweep is None and not self._force_port_scan:
             return
@@ -1469,14 +1484,15 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     async def scan_ports(self, keys: list[str] | None = None) -> dict[str, list[int]]:
         """Connect to the configured TCP ports on each node, one host at a time, and record what answered.
 
-        Returns {key: [open ports]}. A second round waits for the first to finish.
+        Returns {key: [open ports]}. A second background round waits for the first to finish; a scan asked
+        for by hand runs beside the round, one at a time.
         """
         ports = ports_for(self.opts[CONF_PORT_SCAN_PORTS], self.opts.get(CONF_PORT_SCAN_CUSTOM))
         targets = self._port_targets(keys)
         if not ports or not targets:
             return {}
         result: dict[str, list[int]] = {}
-        async with self._port_scan_lock:
+        async with (self._port_scan_lock if keys is None else self._hand_scan_lock):
             for key, ip in targets:
                 try:
                     open_ports = await scan_ports(ip, ports, PORT_SCAN_TIMEOUT, PORT_SCAN_CONCURRENCY)

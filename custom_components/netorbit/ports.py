@@ -9,6 +9,7 @@ about (Bonjour, SSDP) are already read the proper way.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 import socket
 
 # Ports a home or lab network is likely to have, with the names people know them by.
@@ -87,15 +88,23 @@ _SERVBYPORT_CACHE: dict[int, str | None] = {}
 
 
 def service_name(port: int) -> str | None:
-    """The usual name for a port: from the built-in table first, then the system's services file."""
+    """The usual name for a port: from the built-in table, else from the system's services file once
+    `warm_service_names` has looked it up (that read happens off the event loop)."""
     if port in EXTENDED_PORTS:
         return EXTENDED_PORTS[port]
-    if port not in _SERVBYPORT_CACHE:
+    return _SERVBYPORT_CACHE.get(port)
+
+
+def warm_service_names(ports: Iterable[int]) -> None:
+    """Look up names for ports outside the built-in table in the system's services file. Blocking: run it
+    in an executor, once, when the custom port list changes."""
+    for port in ports:
+        if port in EXTENDED_PORTS or port in _SERVBYPORT_CACHE:
+            continue
         try:
             _SERVBYPORT_CACHE[port] = socket.getservbyport(port, "tcp")
         except (OSError, OverflowError):
             _SERVBYPORT_CACHE[port] = None
-    return _SERVBYPORT_CACHE[port]
 
 
 def parse_ports(text: str | None) -> list[int]:

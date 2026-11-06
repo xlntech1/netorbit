@@ -68,7 +68,8 @@
           "port_scan_interval": "Port scan every",
           "port_scan_ports": "Ports to scan",
           "port_scan_custom": "Custom ports",
-          "port_scan_hubs": "Scan hubs too"
+          "port_scan_hubs": "Scan hubs too",
+          "port_scan_auto": "Automatic port scans"
         },
         "data_description": {
           "discovery_interval": "How often the whole subnet is swept for new devices.",
@@ -83,10 +84,11 @@
           "weak_signal_minutes": "A device whose radio signal has read below good (−80 dBm, LQI 80) for this many minutes is drawn in a yellow-green between online and seen-recently, and the popup says for how long; the clock only stops once the signal reads clearly good again (−75 dBm, LQI 100), so a device hovering at the threshold counts. 0 never colours it.",
           "offline_after_rounds": "How many ping rounds in a row a flagged hub or device may miss before it counts as offline and fires netorbit_device_offline. 3 rounds at a 60 s ping interval means one dropped Wi-Fi packet never pages you.",
           "port_counters": "Each ping round, read every managed switch's port byte counters (three short SNMP walks per switch) and draw busier links wider. Turn off to keep the MAC tables but skip the counters.",
-          "port_scan_interval": "Hours between checks of which TCP ports each online device accepts connections on. 0 turns port discovery off. Devices are scanned one at a time with a plain connect and nothing is sent, but an intrusion detection system on your network may still log it: allow Home Assistant's address there first.",
+          "port_scan_interval": "Hours between automatic port scans, 1 to 168. Only used with automatic port scans on.",
           "port_scan_ports": "Common is about 70 well-known ports (ssh, http, smb, rdp, mqtt and so on). Extended adds about 270 more admin, database, media and IoT ports and takes longer. Custom scans only the ports listed below.",
           "port_scan_custom": "Only used with Custom: ports and ranges separated by commas, such as 22, 80, 443, 8000-8100. At most 1024 ports.",
-          "port_scan_hubs": "Also scan the router, switches and access points."
+          "port_scan_hubs": "Also scan the router, switches and access points.",
+          "port_scan_auto": "Off by default. When on, NetOrbit checks which TCP ports each online device accepts connections on, every so many hours (below). Devices are scanned one at a time with a plain connect and nothing is sent, but security software on your network may flag the connects or block Home Assistant's address: allow that address there first. Scan now in a device's details, and the netorbit.scan_ports action, work whether this is on or off."
         }
       },
       "add_hub": {

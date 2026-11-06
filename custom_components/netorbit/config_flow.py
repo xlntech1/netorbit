@@ -28,6 +28,7 @@ from .const import (
     CONF_PORT_COUNTERS,
     CONF_PING_INTERVAL,
     CONF_PORT_SCAN_CUSTOM,
+    CONF_PORT_SCAN_AUTO,
     CONF_PORT_SCAN_HUBS,
     CONF_PORT_SCAN_INTERVAL,
     CONF_PORT_SCAN_PORTS,
@@ -245,6 +246,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                         CONF_WEAK_AFTER: int(user_input[CONF_WEAK_AFTER]),
                         CONF_OFFLINE_AFTER: int(user_input[CONF_OFFLINE_AFTER]),
                         CONF_PORT_COUNTERS: user_input[CONF_PORT_COUNTERS],
+                        CONF_PORT_SCAN_AUTO: user_input[CONF_PORT_SCAN_AUTO],
                         CONF_PORT_SCAN_INTERVAL: int(user_input[CONF_PORT_SCAN_INTERVAL]),
                         CONF_PORT_SCAN_PORTS: user_input[CONF_PORT_SCAN_PORTS],
                         CONF_PORT_SCAN_CUSTOM: custom,
@@ -271,7 +273,8 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
                     sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
                 ),
-                vol.Required(CONF_PORT_SCAN_INTERVAL, default=o[CONF_PORT_SCAN_INTERVAL]): _int_box(0, 168, "h"),
+                vol.Required(CONF_PORT_SCAN_AUTO, default=o[CONF_PORT_SCAN_AUTO]): bool,
+                vol.Required(CONF_PORT_SCAN_INTERVAL, default=o[CONF_PORT_SCAN_INTERVAL]): _int_box(1, 168, "h"),
                 vol.Required(CONF_PORT_SCAN_PORTS, default=o[CONF_PORT_SCAN_PORTS]): _select(PORT_SET_CHOICES, "port_scan_ports"),
                 vol.Optional(CONF_PORT_SCAN_CUSTOM, description={"suggested_value": o.get(CONF_PORT_SCAN_CUSTOM) or None}): str,
                 vol.Required(CONF_PORT_SCAN_HUBS, default=o[CONF_PORT_SCAN_HUBS]): bool,

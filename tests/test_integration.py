@@ -992,6 +992,58 @@ async def test_port_scan(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeF
     assert dev.attributes["ports_named"] == ["22/ssh", "8123/home-assistant", "65000"] and dev.attributes["ports_closed"] == []
 
 
+async def test_port_scans_wait_to_be_turned_on(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
+    """Automatic port scans are off until someone turns them on; scans asked for by hand work either way."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    fake_net.ports = {GATEWAY: {80}, "192.0.2.11": {22}}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data.opts["port_scan_auto"] is False and entry.runtime_data.opts["port_scan_interval"] == 24
+    await _advance(hass, freezer, 25 * 3600)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert fake_net.port_scans == []
+
+    # Scan now: one device, then everything online. Neither starts a schedule.
+    result = await hass.services.async_call(DOMAIN, "scan_ports", {"device": [MAC_B]}, blocking=True, return_response=True)
+    assert result == {"scanned": 1, "open": {"Device 53:0B": [22]}}
+    result = await hass.services.async_call(DOMAIN, "scan_ports", {}, blocking=True, return_response=True)
+    assert result == {"scheduled": 2}
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert sorted(fake_net.port_scans) == sorted(["192.0.2.11", GATEWAY, "192.0.2.11"])
+    fake_net.port_scans.clear()
+    await _advance(hass, freezer, 25 * 3600)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert fake_net.port_scans == []
+
+    # Turned on in Settings: the last round is more than the interval ago, so one runs at the next ping round,
+    # then the next one an interval later.
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "settings"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"port_scan_auto": True, "port_scan_interval": 12})
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["port_scan_auto"] is True and entry.options["port_scan_interval"] == 12
+    await _advance(hass, freezer, 60)
+    assert sorted(fake_net.port_scans) == sorted([GATEWAY, "192.0.2.11"])
+    fake_net.port_scans.clear()
+    await _advance(hass, freezer, 6 * 3600)
+    assert fake_net.port_scans == []
+    await _advance(hass, freezer, 6 * 3600 + 60)
+    assert sorted(fake_net.port_scans) == sorted([GATEWAY, "192.0.2.11"])
+
+
+def test_port_scan_settings_from_before_the_switch() -> None:
+    """Saved settings without the switch: a number of hours meant on, 0 meant off (and gets the default interval)."""
+    from custom_components.netorbit.coordinator import options_with_defaults  # noqa: PLC0415
+
+    assert {k: options_with_defaults(_entry("auto", port_scan_interval=6))[k] for k in ("port_scan_auto", "port_scan_interval")} == {
+        "port_scan_auto": True, "port_scan_interval": 6}
+    assert {k: options_with_defaults(_entry("auto", port_scan_interval=0))[k] for k in ("port_scan_auto", "port_scan_interval")} == {
+        "port_scan_auto": False, "port_scan_interval": 24}
+    assert options_with_defaults(_entry("auto", port_scan_auto=False, port_scan_interval=6))["port_scan_auto"] is False
+
+
 async def test_hand_scans_do_not_postpone_the_round(hass: HomeAssistant, fake_net, freezer: FrozenDateTimeFactory) -> None:
     """The schedule remembers the last full round across a restart, not the newest scan of one device."""
     fake_net.alive = {GATEWAY, "192.0.2.11"}
