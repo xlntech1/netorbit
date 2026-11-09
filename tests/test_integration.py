@@ -518,3 +518,154 @@ async def test_internet_check_can_be_turned_off(hass: HomeAssistant, fake_net) -
     await _setup(hass, _entry("auto", check_internet=False))
     assert _internet(hass) is None
     assert "1.1.1.1" not in pinged and "8.8.8.8" not in pinged
+
+
+async def test_prefer_dns_names(hass: HomeAssistant, fake_net) -> None:
+    """With the option on, the network's own name beats other integrations, and replaces made-up hub names."""
+    fake_net.alive = {GATEWAY, "192.0.2.11", "192.0.2.12"}
+    fake_net.arp = {GATEWAY: "00:00:5e:00:53:01", "192.0.2.11": MAC_B, "192.0.2.12": MAC_C}
+    fake_net.dns = {GATEWAY: "edge.home.example.", "192.0.2.11": "printer-hall.home.example"}
+    hass.states.async_set("device_tracker.p", "home", {"mac": MAC_B, "friendly_name": "Hall Printer"})
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    nodes = _node_states(hass)
+    assert {"Router", "Hall Printer", "Device 53:0C"} <= set(nodes)
+    assert nodes["Hall Printer"].attributes["fqdn"] == "printer-hall.home.example"
+    assert nodes["Hall Printer"].attributes["hostname"] == "printer-hall"
+    assert nodes["Router"].attributes["fqdn"] == "edge.home.example"
+    assert nodes["Device 53:0C"].attributes["fqdn"] is None
+
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "prefer_dns_names": True})
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    assert {"edge", "printer-hall", "Device 53:0C"} <= set(nodes)
+    assert "Router" not in nodes and "Hall Printer" not in nodes
+
+    # A name a person typed is kept, for hubs and devices alike.
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "name": "Core router"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "name": "Lobby printer"}, blocking=True)
+    await hass.async_block_till_done()
+    nodes = _node_states(hass)
+    assert {"Core router", "Lobby printer"} <= set(nodes)
+    assert next(h for h in entry.options["hubs"] if h["id"] == "gateway")["name_auto"] is False
+
+    # Clearing the device name goes back to the DNS name.
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "name": ""}, blocking=True)
+    await hass.async_block_till_done()
+    assert "printer-hall" in _node_states(hass)
+
+
+async def test_import_checks_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
+    """An import goes through the same checks as the services: bad values are left out, the rest applies, and a
+    broken value already saved can't make the refreshes fail."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    coord = entry.runtime_data
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "managed_by": "ISP", "fields": {"Model": "Edge 1"}}, blocking=True)
+    await hass.async_block_till_done()
+
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    exported["hubs"][0]["fields"] = "abc"  # not a mapping: the hub keeps the fields it has
+    exported["hubs"][0]["managed_by"] = "m" * 501  # too long: the hub keeps its Managed by
+    many = {f"F{i}": "v" for i in range(25)}
+    exported["devices"][MAC_B] = {"name": "Printer", "managed_by": ["a", "list"], "fields": {"Ok": "fine", "Long": "y" * 501, "Rack": 2, **many}}
+    res = await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True, return_response=True)
+    await hass.async_block_till_done()
+    # hub fields + hub managed_by + device managed_by + Long + Rack + the 6 fields past the limit of 20
+    assert res["skipped"] == 11
+
+    hub = next(h for h in entry.options["hubs"] if h["id"] == "gateway")
+    assert hub["fields"] == {"Model": "Edge 1"} and hub["managed_by"] == "ISP"
+    dev = entry.options["devices"][MAC_B]
+    assert dev["name"] == "Printer" and "managed_by" not in dev
+    assert list(dev["fields"]) == ["Ok", *[f"F{i}" for i in range(19)]]
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.last_update_success
+    assert _node_states(hass)["Printer"].attributes["fields"]["Ok"] == "fine"
+
+    # A broken value saved some other way (an edit by hand) doesn't stop the refreshes either.
+    opts = {**entry.options, "hubs": [{**h, "fields": "abc", "managed_by": 5} if h["id"] == "gateway" else h for h in entry.options["hubs"]]}
+    hass.config_entries.async_update_entry(entry, options=opts)
+    await hass.async_block_till_done()
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.last_update_success
+    router = _node_states(hass)["Router"].attributes
+    assert router["fields"] == {} and router["managed_by"] is None
+
+
+async def test_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
+    """Free text on devices and hubs: services, attributes, export/import and the options flow."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+
+    await hass.services.async_call(
+        DOMAIN, "update_device",
+        {"device": MAC_B, "managed_by": "https://192.0.2.1/", "fields": {"Location": "Hall", "Owner": " Sam "}},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["managed_by"] == "https://192.0.2.1/"
+    assert dev.attributes["fields"] == {"Location": "Hall", "Owner": "Sam"}
+
+    # An empty value removes a field, an empty managed_by removes it.
+    await hass.services.async_call(
+        DOMAIN, "update_device", {"device": MAC_B, "managed_by": "", "fields": {"Owner": None, "Serial": "ABC"}}, blocking=True
+    )
+    await hass.async_block_till_done()
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["managed_by"] is None
+    assert dev.attributes["fields"] == {"Location": "Hall", "Serial": "ABC"}
+
+    # Hubs take the same fields.
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "managed_by": "ISP", "fields": {"Model": "Edge 1"}}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Router"].attributes["fields"] == {"Model": "Edge 1"}
+    assert _node_states(hass)["Router"].attributes["managed_by"] == "ISP"
+
+    # Too much text is refused with a readable error.
+    with pytest.raises(Exception, match="500"):
+        await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "fields": {"Notes": "x" * 501}}, blocking=True)
+
+    # Exports carry the text; an import restores it.
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    assert exported["devices"][MAC_B]["fields"] == {"Location": "Hall", "Serial": "ABC"}
+    assert exported["hubs"][0]["fields"] == {"Model": "Edge 1"} and exported["hubs"][0]["managed_by"] == "ISP"
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "fields": {"Location": None, "Serial": None}}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["fields"] == {}
+    await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True)
+    await hass.async_block_till_done()
+    assert _node_states(hass)["Device 53:0B"].attributes["fields"] == {"Location": "Hall", "Serial": "ABC"}
+
+    # The options flow edits the same text, one "Label: value" per line, and replaces the whole list.
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"next_step_id": "edit_device"})
+    flow = await hass.config_entries.options.async_configure(flow["flow_id"], {"device": MAC_B})
+    flow = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"hub": "gateway", "sleepy": False, "fields_text": "no separator"}
+    )
+    assert flow["type"] is FlowResultType.FORM and flow["errors"] == {"fields_text": "bad_fields"}
+    flow = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"hub": "gateway", "sleepy": False, "managed_by": "Core switch", "fields_text": "Rack: 2\nNotes: spare"}
+    )
+    assert flow["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    dev = _node_states(hass)["Device 53:0B"]
+    assert dev.attributes["managed_by"] == "Core switch"
+    assert dev.attributes["fields"] == {"Rack": "2", "Notes": "spare"}
+
+    # Diagnostics only count them.
+    from homeassistant.components.diagnostics import REDACTED  # noqa: F401, PLC0415
+    from custom_components.netorbit.diagnostics import async_get_config_entry_diagnostics  # noqa: PLC0415
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert all("Rack" not in str(n) and "Core switch" not in str(n) for n in diag["nodes"])
+    assert any(n["field_count"] == 2 and n["has_managed_by"] for n in diag["nodes"])

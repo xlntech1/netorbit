@@ -58,7 +58,8 @@
           "group_by_type": "Group devices by type when the layout is unknown",
           "check_internet": "Show the internet on the map",
           "snmp_enabled": "Read MAC tables from managed switches (SNMP)",
-          "snmp_community": "SNMP community (password)"
+          "snmp_community": "SNMP community (password)",
+          "prefer_dns_names": "Prefer DNS and Bonjour names"
         },
         "data_description": {
           "discovery_interval": "How often the whole subnet is swept for new devices.",
@@ -68,7 +69,8 @@
           "group_by_type": "On networks where nothing reports which access point a device uses, the card groups devices into TVs, computers, smart home and so on.",
           "check_internet": "Each ping round also pings two public DNS servers (1.1.1.1 and 8.8.8.8). The Internet node turns red when neither answers for two rounds while your router still does, and fires netorbit_internet_down and netorbit_internet_up events.",
           "snmp_enabled": "NetOrbit asks each device once an hour whether it is a managed switch, using read-only SNMP, then reads the switch's MAC table to place devices automatically.",
-          "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here."
+          "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here.",
+          "prefer_dns_names": "Show the name your network gives a device (reverse DNS, or the name it announces over Bonjour) before names from other integrations, and use it for hubs NetOrbit named itself, such as the router. Names you typed are always kept."
         }
       },
       "add_hub": {
@@ -78,10 +80,14 @@
           "name": "Name",
           "host": "IP address (optional)",
           "type": "Type",
-          "parent": "Connected to"
+          "parent": "Connected to",
+          "managed_by": "Managed by (optional)",
+          "fields_text": "Extra fields (optional)"
         },
         "data_description": {
-          "host": "Leave empty for unmanaged switches with no IP. Hubs with an IP are pinged like devices."
+          "host": "Leave empty for unmanaged switches with no IP. Hubs with an IP are pinged like devices.",
+          "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
         }
       },
       "edit_hub": {
@@ -97,7 +103,13 @@
           "host": "IP address (optional)",
           "type": "Type",
           "parent": "Connected to",
-          "remove": "Remove this hub"
+          "remove": "Remove this hub",
+          "managed_by": "Managed by (optional)",
+          "fields_text": "Extra fields (optional)"
+        },
+        "data_description": {
+          "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
         }
       },
       "add_device": {
@@ -109,7 +121,13 @@
           "name": "Name (optional)",
           "icon": "Icon (optional)",
           "hub": "Connected through (Automatic lets NetOrbit decide)",
-          "sleepy": "Allowed to sleep (never fires a stale event)"
+          "sleepy": "Allowed to sleep (never fires a stale event)",
+          "managed_by": "Managed by (optional)",
+          "fields_text": "Extra fields (optional)"
+        },
+        "data_description": {
+          "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
         }
       },
       "edit_device": {
@@ -126,7 +144,13 @@
           "icon": "Icon (empty picks one automatically)",
           "hub": "Connected through (Automatic lets NetOrbit decide)",
           "sleepy": "Allowed to sleep (never fires a stale event)",
-          "stop_tracking": "Stop tracking and ignore this device"
+          "stop_tracking": "Stop tracking and ignore this device",
+          "managed_by": "Managed by (optional)",
+          "fields_text": "Extra fields (optional)"
+        },
+        "data_description": {
+          "managed_by": "A link (https://…) or the name of the hub or device on the map that manages this one.",
+          "fields_text": "One per line, as Label: value. Shown when you tap the device on the map."
         }
       },
       "review_new": {
@@ -161,7 +185,8 @@
       "hub_exists": "Another hub already uses that address.",
       "no_addresses": "No MAC or IP addresses were found in that text.",
       "no_matches": "None of those addresses match a device on this network.",
-      "not_loaded": "NetOrbit is not running right now. Try again in a minute."
+      "not_loaded": "NetOrbit is not running right now. Try again in a minute.",
+      "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields."
     },
     "abort": {
       "no_devices": "No devices are being tracked yet.",
@@ -432,6 +457,14 @@
         "config_entry_id": {
           "name": "Config entry",
           "description": "Only needed if you have more than one NetOrbit entry."
+        },
+        "managed_by": {
+          "name": "Managed by",
+          "description": "A link or the name of the thing on the map that manages it. Empty removes it."
+        },
+        "fields": {
+          "name": "Extra fields",
+          "description": "Label to value pairs to add or change. An empty value removes that label."
         }
       }
     },
@@ -456,6 +489,44 @@
         "replace": {
           "name": "Replace",
           "description": "Replace everything instead of merging."
+        },
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "Only needed if you have more than one NetOrbit entry."
+        }
+      }
+    },
+    "update_device": {
+      "name": "Update device",
+      "description": "Rename a device, change its icon, hub or sleep setting, or its Managed by and extra fields.",
+      "fields": {
+        "device": {
+          "name": "Device",
+          "description": "Device name, IP or MAC address."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name to show on the map. Empty goes back to the discovered name."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Icon to show on the map. Empty picks one automatically."
+        },
+        "hub": {
+          "name": "Hub",
+          "description": "Hub it connects through."
+        },
+        "sleepy": {
+          "name": "Allowed to sleep",
+          "description": "Never fire a stale event for this device."
+        },
+        "managed_by": {
+          "name": "Managed by",
+          "description": "A link or the name of the thing on the map that manages it. Empty removes it."
+        },
+        "fields": {
+          "name": "Extra fields",
+          "description": "Label to value pairs to add or change. An empty value removes that label."
         },
         "config_entry_id": {
           "name": "Config entry",
