@@ -10,9 +10,37 @@ permissions:
 jobs:
   zip:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - name: Check manifest version matches the tag
         run: |
           v=$(python3 -c "import json;print(json.load(open('custom_components/netorbit/manifest.json'))['version'])")
           test "v$v" = "${GITHUB_REF_NAME}" || test "$v" = "${GITHUB_REF_NAME}"
+      - name: Build netorbit.zip
+        working-directory: custom_components/netorbit
+        run: zip -r ../../netorbit.zip . -x "__pycache__/*" "*/__pycache__/*" "*.pyc"
+      - name: Check the files are at the zip root
+        run: |
+          names=$(unzip -Z1 netorbit.zip)
+          for f in manifest.json __init__.py frontend/netorbit-card.js; do
+            if ! grep -Fxq -- "$f" <<< "$names"; then
+              echo "::error::netorbit.zip has no $f at its root"
+              exit 1
+            fi
+          done
+      - name: Upload netorbit.zip to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" netorbit.zip --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Check the release has netorbit.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          names=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq ".assets[].name")
+          if ! grep -Fxq netorbit.zip <<< "$names"; then
+            echo "::error::Release $GITHUB_REF_NAME has no netorbit.zip asset"
+            exit 1
+          fi
