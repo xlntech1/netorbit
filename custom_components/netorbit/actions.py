@@ -5,6 +5,7 @@ Each returns a small dict describing what happened, in words an assistant can re
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,8 @@ from .logic import extract_addresses, normalize_mac
 
 if TYPE_CHECKING:
     from .coordinator import NetOrbitCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ActionError(manage.ManageError):
@@ -78,17 +81,18 @@ def network_map(coord: NetOrbitCoordinator) -> dict[str, Any]:
         for node in data.nodes.values():
             if node.kind == INTERNET_KEY:
                 continue
+            extra = {k: v for k, v in (("managed_by", node.managed_by), ("fields", node.fields), ("dns_name", node.fqdn)) if v}
             if node.kind == "hub":
                 hubs.append({
                     "id": node.key.removeprefix("hub:"), "name": node.name, "type": node.hub_type,
                     "connected_to": node.link, "ip": node.ip, "mac": node.mac, "status": node.status,
-                    "added_by": node.hub_source,
+                    "added_by": node.hub_source, **extra,
                 })
             else:
                 devices.append({
                     "name": node.name, "ip": node.ip, "mac": node.mac, "hub": node.link,
                     "placed_by": node.placement, "status": node.status, "vendor": node.vendor,
-                    "hostname": node.hostname, "allowed_to_sleep": node.sleepy,
+                    "hostname": node.hostname, "allowed_to_sleep": node.sleepy, **extra,
                 })
     return {
         "hubs": hubs,
@@ -124,6 +128,7 @@ async def add_hub(
     hass, entry, coord, name: str | None = None, hub_type: str = HUB_AP, parent: str | None = None,
     ip: str | None = None, mac: str | None = None, device: str | None = None,
 ) -> dict[str, Any]:
+    named_by_netorbit = False
     if device:
         key = coord.resolve_device(device)
         if not key:
@@ -131,24 +136,27 @@ async def add_hub(
         rec = coord.known_device(key) or {}
         ip = ip or rec.get("ip")
         mac = mac or rec.get("mac")
-        name = name or _name(coord, key)
+        if not name:
+            name, named_by_netorbit = _name(coord, key), True
     if not name:
         raise ActionError("A hub needs a name")
     parent_id = _hub(coord, parent, default_root=True)
     opts = _opts(coord)
-    result = manage.add_hub(opts, name, hub_type, parent_id, ip, normalize_mac(mac), source="manual")
+    # A name taken from the device record is NetOrbit's guess, not a choice.
+    result = manage.add_hub(opts, name, hub_type, parent_id, ip, normalize_mac(mac), source="manual", name_auto=named_by_netorbit)
     if parent:
         manage.update_hub(opts, result["hub"], parent=parent_id)
     await _save(hass, entry, coord, opts)
     return result
 
 
-async def update_hub(hass, entry, coord, hub: str, **fields: Any) -> dict[str, Any]:
+async def update_hub(hass, entry, coord, hub: str, **changes: Any) -> dict[str, Any]:
+    """Rename a hub, change its type or parent, or its Managed by / extra fields."""
     hub_id = _hub(coord, hub)
-    if fields.get("parent"):
-        fields["parent"] = _hub(coord, fields["parent"])
+    if changes.get("parent"):
+        changes["parent"] = _hub(coord, changes["parent"])
     opts = _opts(coord)
-    manage.update_hub(opts, hub_id, **{k: v for k, v in fields.items() if v is not None})
+    manage.update_hub(opts, hub_id, **{k: v for k, v in changes.items() if v is not None})
     await _save(hass, entry, coord, opts)
     return {"hub": hub_id}
 
@@ -205,9 +213,10 @@ async def confirm_hub(
             raise ActionError(f"None of these devices were found: {', '.join(missing) or ', '.join(assign)}")
     suggestion = next((s for s in (coord.data.suggested_hubs if coord.data else []) if s["key"] == key), None)
     hub_type = hub_type or (suggestion or {}).get("type") or HUB_AP
+    chosen = bool(name)
     name = name or (suggestion or {}).get("name") or _name(coord, key)
     opts = _opts(coord)
-    result = manage.add_hub(opts, name, hub_type, None, rec.get("ip"), rec.get("mac"), source="manual")
+    result = manage.add_hub(opts, name, hub_type, None, rec.get("ip"), rec.get("mac"), source="manual", name_auto=not chosen)
     # The device is now a hub, so drop any device-level settings for it.
     opts[CONF_DEVICES].pop(key, None)
     if keys:
@@ -230,26 +239,29 @@ async def dismiss_hub(hass, entry, coord, device: str) -> dict[str, Any]:
 
 async def update_device(
     hass, entry, coord, device: str, name: str | None = None, icon: str | None = None,
-    sleepy: bool | None = None, hub: str | None = None,
+    sleepy: bool | None = None, hub: str | None = None, managed_by: str | None = None,
+    fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Change what a person set on a device. An empty name or icon goes back to the discovered one."""
     key = coord.resolve_device(device)
     if not key:
         raise ActionError(f"No device matches '{device}'")
     opts = _opts(coord)
     cfg = opts[CONF_DEVICES].setdefault(key, {})
     cfg["tracked"] = True
-    if name is not None:
-        # An empty name clears the one you set, so the device goes back to its automatic name.
-        if name.strip():
-            cfg["name"] = name.strip()
+    for label, value in (("name", name), ("icon", icon)):
+        if value is None:
+            continue
+        # An empty name or icon clears the one you set, so the device goes back to its automatic one.
+        if value.strip():
+            cfg[label] = value.strip()
         else:
-            cfg.pop("name", None)
-    if icon:
-        cfg["icon"] = icon
+            cfg.pop(label, None)
     if sleepy is not None:
         cfg["sleepy"] = sleepy
     if hub:
         manage.assign(opts, [key], _hub(coord, hub))
+    manage.set_fields(cfg, managed_by, fields)
     if key in opts[CONF_IGNORED]:
         opts[CONF_IGNORED].remove(key)
     await _save(hass, entry, coord, opts)
@@ -262,11 +274,12 @@ EXPORT_VERSION = 1
 def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     """Everything a person has set up, keyed by MAC, so it can be backed up or moved."""
     opts = coord.opts
-    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at")
+    keep = ("name", "icon", "hub", "sleepy", "tracked", "host", "placed_at", "managed_by", "fields")
+    hub_keep = ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source", "name_auto", "managed_by", "fields")
     return {
         "netorbit_export": EXPORT_VERSION,
         "hubs": [
-            {k: h.get(k) for k in ("id", "name", "type", "parent", "parent_locked", "host", "mac", "source") if h.get(k) is not None}
+            {k: h.get(k) for k in hub_keep if h.get(k) is not None}
             for h in opts[CONF_HUBS]
         ],
         "devices": {key: {k: v for k, v in cfg.items() if k in keep} for key, cfg in opts[CONF_DEVICES].items()},
@@ -275,16 +288,51 @@ def export_config(coord: NetOrbitCoordinator) -> dict[str, Any]:
     }
 
 
+TEXT_KEYS = ("managed_by", "fields")
+
+
+def _import_text(target: dict[str, Any], src: dict[str, Any]) -> int:
+    """Set Managed by and the extra fields of an imported hub or device on `target` through manage.set_fields, so
+    an import gets the same checks as the services and forms. A value that fails them is left out and the setting
+    already there is kept; an imported list of fields replaces the old one. Returns how many values were left out."""
+    skipped = 0
+    if "managed_by" in src:
+        value = src["managed_by"]
+        try:
+            if value is not None and not isinstance(value, str):
+                raise manage.ManageError("Managed by must be text")
+            manage.set_fields(target, managed_by=value or "")
+        except manage.ManageError:
+            skipped += 1
+    if "fields" in src:
+        fields = src["fields"]
+        if isinstance(fields, dict):
+            target.pop("fields", None)
+            for label, value in fields.items():
+                try:
+                    if not isinstance(value, str):
+                        raise manage.ManageError("A field value must be text")
+                    manage.set_fields(target, fields={label: value})
+                except manage.ManageError:
+                    skipped += 1
+        elif fields is not None:
+            skipped += 1
+    return skipped
+
+
 async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool = False) -> dict[str, Any]:
     """Restore an export. By default it merges: imported settings win, nothing else is removed."""
     if not isinstance(data, dict) or data.get("netorbit_export") != EXPORT_VERSION:
         raise ActionError("That is not a NetOrbit export")
     opts = _opts(coord)
     hubs = {h["id"]: h for h in ([] if replace else opts[CONF_HUBS])}
+    skipped = 0
     for h in data.get("hubs", []):
         if not isinstance(h, dict) or not h.get("id"):
             continue
-        hubs[h["id"]] = {**hubs.get(h["id"], {}), **h}
+        merged = {**hubs.get(h["id"], {}), **{k: v for k, v in h.items() if k not in TEXT_KEYS}}
+        skipped += _import_text(merged, h)
+        hubs[h["id"]] = merged
     if ROOT_HUB_ID not in hubs:
         hubs[ROOT_HUB_ID] = next(x for x in opts[CONF_HUBS] if x["id"] == ROOT_HUB_ID)
     hubs[ROOT_HUB_ID]["parent"] = None
@@ -300,13 +348,19 @@ async def import_config(hass, entry, coord, data: dict[str, Any], replace: bool 
         if isinstance(cfg, dict):
             if cfg.get("hub") and cfg["hub"] not in ids:
                 cfg = {k: v for k, v in cfg.items() if k != "hub"}
-            devices[key] = {**devices.get(key, {}), **cfg}
+            merged = {**devices.get(key, {}), **{k: v for k, v in cfg.items() if k not in TEXT_KEYS}}
+            skipped += _import_text(merged, cfg)
+            devices[key] = merged
     opts[CONF_DEVICES] = devices
     for field in (CONF_IGNORED, "dismissed_hubs"):
         merged = list(dict.fromkeys([*([] if replace else opts.get(field, [])), *(data.get(field) or [])]))
         opts[field] = merged
     await _save(hass, entry, coord, opts)
-    return {"hubs": len(opts[CONF_HUBS]), "devices": len(devices)}
+    result = {"hubs": len(opts[CONF_HUBS]), "devices": len(devices)}
+    if skipped:
+        _LOGGER.warning("NetOrbit: the import left out %d Managed by or field values that were not valid", skipped)
+        result["skipped"] = skipped
+    return result
 
 
 async def track(hass, entry, coord, mac: str | None = None, ip: str | None = None, **fields: Any) -> dict[str, Any]:

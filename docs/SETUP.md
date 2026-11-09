@@ -93,6 +93,8 @@ Whatever NetOrbit couldn't work out, you can place yourself. Three ways, use whi
 
 NetOrbit names devices from, in order: Home Assistant's own device list, router and controller integrations, Ping sensors you've set up, your router's local DNS, and the name a device announces over Bonjour. When none of those know a device, it shows the maker (for example "Apple 28:54").
 
+**Prefer DNS and Bonjour names** (Configure > Settings, off by default) puts the name your network gives a device first, ahead of names from other integrations, and replaces hub names NetOrbit made up (such as *Router*) with the real ones. Names you typed yourself are kept. The network's name is the reverse DNS entry when your router or DNS server has one for the address, else the name the device announces over Bonjour. NetOrbit looks names up again every 12 hours.
+
 To rename one, open its sensor in Home Assistant and change the name, or use **Configure > Track / edit a device**. Names stick to the device's MAC address, so they survive IP changes.
 
 <p align="right"><sub><a href="../README.md#netorbit">back to the map</a></sub></p>
