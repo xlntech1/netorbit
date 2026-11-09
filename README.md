@@ -1,6 +1,8 @@
 # NetOrbit
 
-[![Marketplace](https://img.shields.io/badge/Home%20Assistant-Marketplace-41BDF5.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=the-scott-davis&repository=netorbit&category=integration) [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=the-scott-davis&repository=netorbit&category=integration) ![Version](https://img.shields.io/github/v/release/the-scott-davis/netorbit) ![License](https://img.shields.io/github/license/the-scott-davis/netorbit)
+[![Open NetOrbit in the Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=the-scott-davis&repository=netorbit&category=integration)
+
+![Version](https://img.shields.io/github/v/release/the-scott-davis/netorbit) ![License](https://img.shields.io/github/license/the-scott-davis/netorbit)
 
 A live, radial map of your home network for Home Assistant. Every device orbits the router, switch, access point or mesh node it connects through, colored by whether it's answering right now, was seen recently, or has gone quiet.
 
@@ -112,7 +114,7 @@ Placement you choose always wins over automatic placement. Each device shows how
 
 ## Install
 
-NetOrbit installs from the Home Assistant **Marketplace** (Home Assistant 2026.11 and newer) or from **HACS** (older versions). It's the same repository either way. HACS is built into Home Assistant as the Marketplace starting with 2026.11, which is expected around early November 2026. Until that release is out and settled, the exact screens below may differ a little.
+NetOrbit is in the default store, so you can find it by searching. On Home Assistant 2026.11 and newer that's the built-in **Marketplace**; on older versions it's **HACS**. It's the same repository either way.
 
 NetOrbit needs Home Assistant 2026.2 or newer.
 
@@ -120,8 +122,8 @@ NetOrbit needs Home Assistant 2026.2 or newer.
 
 [![Open NetOrbit in the Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=the-scott-davis&repository=netorbit&category=integration)
 
-1. Click the button above, or go to **Settings > Marketplace** and add `https://github.com/the-scott-davis/netorbit` as a custom repository with type **Integration**. Adding a custom repository asks you to connect a GitHub account once.
-2. Download **NetOrbit**. Home Assistant shows a warning that community code runs with full access to your home; read it and confirm.
+1. Click the button above, or go to **Settings > Marketplace** and search for **NetOrbit**.
+2. Download it. Home Assistant shows a warning that community code runs with full access to your home; read it and confirm.
 3. Set it up when asked, or go to **Settings > Devices & services > Add integration > NetOrbit**. The subnet and router are filled in for you. No restart is needed for a first install.
 4. Refresh your browser once so the card loads, then [add the map to a dashboard](#add-the-map-to-a-dashboard).
 
@@ -129,12 +131,9 @@ Updates show up in **Settings > Updates** like any other. Updating still needs a
 
 ### HACS (Home Assistant 2026.10 and older)
 
-[![Open NetOrbit in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=the-scott-davis&repository=netorbit&category=integration)
-
-1. In HACS, open the menu, choose **Custom repositories**, add `https://github.com/the-scott-davis/netorbit` with type **Integration**.
-2. Download **NetOrbit** and restart Home Assistant.
-3. Go to **Settings > Devices & services > Add integration > NetOrbit**.
-4. [Add the map to a dashboard](#add-the-map-to-a-dashboard).
+1. In HACS, search for **NetOrbit** and download it, then restart Home Assistant.
+2. Go to **Settings > Devices & services > Add integration > NetOrbit**.
+3. [Add the map to a dashboard](#add-the-map-to-a-dashboard).
 
 HACS on 2026.10 and older shows a blank icon for NetOrbit in its list. That's expected: older HACS only looks up icons on Home Assistant's brand site, which no longer takes new custom integrations. NetOrbit ships its own icon, which Home Assistant shows on the integration's page and the Marketplace shows everywhere.
 
@@ -174,12 +173,16 @@ Under the integration's **Configure** menu:
 | --- | --- |
 | Review suggested hubs | Confirm or dismiss everything NetOrbit thinks might be network gear. |
 | Paste a client list | Paste a client list from an access point, app or switch, pick the hub, and every device in it is placed there. |
-| Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to. |
-| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", stop tracking. |
+| Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
+| Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, stop tracking. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
-| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, SNMP on/off and SNMP community. |
+| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off and SNMP community. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
+
+**Managed by and extra fields** are free text on any hub or device: a link to its admin page, the name of the switch or controller that manages it (the map jumps there), a location, a serial number, who owns it. Tap the device on the map to read them, and *Edit* (admins) to change them; `netorbit.update_device` and `netorbit.update_hub` set them too.
+
+**Prefer DNS and Bonjour names** (off by default) puts the name your network gives a device first, before what other integrations call it, and uses it for hubs NetOrbit named itself, such as *Router*. Anything you renamed yourself keeps your name.
 
 **Allowed to sleep** is for TVs, consoles and anything else that's off a lot. They still show their status but never fire the stale event.
 
@@ -197,7 +200,7 @@ Most homes hand out addresses with DHCP, so a device's IP can change at any time
 - **Hubs follow their MAC too.** If an access point gets a new IP, NetOrbit notices on the next sweep and updates it.
 - **Devices added by IP switch to their MAC** as soon as NetOrbit sees them on the network, so they survive the next DHCP change as well.
 - **Renaming works either way.** Rename from the card (Edit layout, tap a device), in NetOrbit's settings, from an AI assistant, or in Home Assistant's own entity settings; the map uses the newest name you set. The one exception is a name typed into Home Assistant's entity settings, which wins over NetOrbit's name until you clear it there (renaming from the card changes it for you).
-- **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling.
+- **Back up your setup.** `netorbit.export_config` returns every name, icon, hub and placement, keyed by MAC. `netorbit.import_config` restores it (merging by default), for example after reinstalling. *Managed by* and extra fields in an import get the same checks as when you type them; any that fail are left out and counted as `skipped` in the response.
 
 Tips for the tidiest map:
 
@@ -232,14 +235,16 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 | `zoom` | `true` | Pinch, double-tap, Ctrl/Cmd+scroll or the + and − buttons zoom the map; drag to look around while zoomed in. `false` for a fixed map. |
 | `device_id` | | Only show one NetOrbit entry when you have several. |
 | `show_share` | `true` | Show the Share button (image or video of the map, with names hidden by default and no addresses). |
+| `layout` | `radial` | `radial`: every device on one ring round the router. `balloon`: each hub in the middle of its own ring of devices, with the hubs below it branching away (good for chains of switches and busy access points). A pick in the header's Radial \| Balloon switch overrides this for that card in that browser, until the card's options are edited. |
+| `layout_toggle` | `true` | Show the Radial \| Balloon switch in the header. With `false` the card always shows its `layout`. |
 
-Hover a device for details, tap it for its history. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get an **Edit layout** button. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
+Hover a device for a summary. Tap a hub or device for its details: DNS name, addresses, maker, the hub it connects through and how it was placed, *Managed by* and extra fields, first and last seen. *More info* there opens Home Assistant's own dialog. **Long-press a hub** to show just its branch (the hubs and devices below it). The hub above shows in grey: long-press it to go up a level, or use the row under the header to go back up. Pinch or double-tap to zoom in on a busy part of the map (Ctrl/Cmd+scroll with a mouse, or the + and − buttons), drag to look around, and zoom out again to scroll the page past the map. Admins get **Edit** in the popup and an **Edit layout** button on the card. Everyone gets **Share**: a PNG to download or copy, or a 7 second video of the scan animation (mp4 where the browser can record it, otherwise webm). The video option only shows up in browsers that can record a canvas, and Copy only where the browser can put images on the clipboard.
 
 <p align="right"><sub><a href="#netorbit">back to the map</a></sub></p>
 
 ## Entities, events and services
 
-- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname` and `sleepy`.
+- One sensor per hub and tracked device. State is `online`, `recent` or `stale` (unknown for a hub with no IP and nothing behind it). Attributes include `ip`, `mac`, `vendor`, `link` (the hub), `placement` (`manual`, `controller`, `snmp` or `none`), `last_seen`, `hostname`, `fqdn` (the full DNS name), `sleepy`, `managed_by` and `fields`.
 - `sensor.netorbit_devices_online` counts online devices and lists `new_devices` and `suggested_hubs`. While a network scan runs it also shows `scanning: true`, the current `scan_phase` (`ping`, `arp`, `names`, `snmp`, `layout`), a rough `scan_progress` (0 to 100) and how many addresses it has `found` so far. `first_scan_done` turns true once the very first scan on this install has finished.
 - `sensor.netorbit_internet` (when the internet check is on): `online`, `stale` (down while the router answers) or unknown.
 
@@ -259,11 +264,12 @@ Every service returns a response describing what it did. Devices can be given by
 | `netorbit.reset_placement` | `device` |
 | `netorbit.import_client_list` | `hub`, `text`, `add_missing` |
 | `netorbit.add_hub` | `name` or `device`, `type`, `parent`, `ip`, `mac` |
-| `netorbit.update_hub` | `hub`, `name`, `type`, `parent` |
+| `netorbit.update_hub` | `hub`, `name`, `type`, `parent`, `managed_by`, `fields` |
 | `netorbit.remove_hub` | `hub` |
 | `netorbit.confirm_hub` | `device`, `type`, `name` |
 | `netorbit.dismiss_hub` | `device` |
 | `netorbit.track_device` | `mac` or `ip`, `name`, `icon`, `hub`, `sleepy` |
+| `netorbit.update_device` | `device`, `name`, `icon`, `hub`, `sleepy`, `managed_by`, `fields` (`{label: value}`, an empty value removes the label) |
 | `netorbit.export_config` | none (returns your settings, keyed by MAC) |
 | `netorbit.import_config` | `data` (an export), `replace` |
 | `netorbit.ignore_device` | `device` or `mac` or `ip` |

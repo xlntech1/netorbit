@@ -57,7 +57,7 @@ jobs:
   browser:
     name: Browser tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     strategy:
@@ -79,22 +79,31 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-1.63.0-${{ runner.os }}-${{ matrix.browser }}
+      - name: Make apt fail fast on a stalled mirror
+        # A slow Ubuntu mirror once trickled the WebKit libraries until the job timed out. Time out a stalled
+        # download and retry it instead, and cap the install steps, so a bad mirror fails within about 6 minutes.
+        run: printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "3";\n' | sudo tee /etc/apt/apt.conf.d/99ci-timeouts
       - name: Install the browser
         if: steps.browsers.outputs.cache-hit != 'true'
+        timeout-minutes: 6
         run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Install browser system libraries
         if: steps.browsers.outputs.cache-hit == 'true'
+        timeout-minutes: 6
         run: npx playwright install-deps ${{ matrix.browser }}
       - name: Serve the repository
         run: |
           python3 -m http.server 8766 > /dev/null 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8766/scripts/preview/index.html > /dev/null && break; sleep 1; done
       - name: Edit layout, zoom and touch in ${{ matrix.browser }}
+        timeout-minutes: 5
         run: |
           set +e
-          BROWSER=${{ matrix.browser }} node scripts/preview/interact.js > interact.log 2>&1
+          # Stop a hung run before the step's own timeout, so its log and the annotation below still come out.
+          BROWSER=${{ matrix.browser }} timeout -k 10 240 node scripts/preview/interact.js > interact.log 2>&1
           code=$?
           cat interact.log
+          if [ $code -eq 124 ]; then echo "::error title=interact.js timed out::stopped after 240 s, see the end of the log above"; fi
           if [ $code -ne 0 ]; then
             # Put the end of the log in an annotation, which stays readable when the raw log is not at hand.
             echo "::error title=interact.js failed::$(grep -v "^\s*[-0-9]* *[×-] \(waiting\|element\|scrolling\|done\|retrying\)" interact.log | tail -n 40 | head -c 5000 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
