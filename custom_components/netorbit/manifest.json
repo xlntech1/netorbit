@@ -31,5 +31,5 @@
     "pysnmp>=7.1",
     "aiooui>=0.1.9"
   ],
-  "version": "0.3.0"
+  "version": "0.3.1"
 }
