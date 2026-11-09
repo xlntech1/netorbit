@@ -81,6 +81,19 @@ update_hub:
         select:
           options: [router, switch, access_point, mesh_node, other]
     parent: {selector: {text: {}}}
+    managed_by: {example: "https://192.0.2.1", selector: {text: {}}}
+    fields: {example: "{Location: Garage, Serial: ABC123}", selector: {object: {}}}
+    config_entry_id: {selector: {config_entry: {integration: netorbit}}}
+
+update_device:
+  fields:
+    device: {required: true, example: "Living Room TV", selector: {text: {}}}
+    name: {selector: {text: {}}}
+    icon: {selector: {icon: {}}}
+    hub: {selector: {text: {}}}
+    sleepy: {selector: {boolean: {}}}
+    managed_by: {example: "Office switch", selector: {text: {}}}
+    fields: {example: "{Owner: Jamie, Notes: spare}", selector: {object: {}}}
     config_entry_id: {selector: {config_entry: {integration: netorbit}}}
 
 export_config:

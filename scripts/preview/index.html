@@ -59,9 +59,16 @@
         if (!st.attributes._auto) st.attributes._auto = st.attributes.label;
         st.attributes.label = String(data.name || "").trim() || st.attributes._auto;
       }
-    } else if (svc === "update_hub") {
-      const st = Object.values(states).find((x) => x.attributes.node_key === "hub:" + data.hub);
-      if (st && data.name) st.attributes.label = data.name;
+    } else if (svc === "update_hub" || svc === "update_device") {
+      const st = svc === "update_hub" ? Object.values(states).find((x) => x.attributes.node_key === "hub:" + data.hub) : findDev(data.device);
+      if (!st) return;
+      if (data.name) st.attributes.label = data.name;
+      if ("managed_by" in data) st.attributes.managed_by = data.managed_by || null;
+      if (data.fields) {
+        const f = Object.assign({}, st.attributes.fields || {});
+        Object.entries(data.fields).forEach(([k, v]) => { if (v) f[k] = v; else delete f[k]; });
+        st.attributes.fields = f;
+      }
     }
   };
   const hass = { states, entities: {}, user: { is_admin: true },
