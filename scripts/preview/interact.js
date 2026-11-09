@@ -91,13 +91,17 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
   assert.strictEqual(calls.at(-1)[1], "confirm_hub");
   console.log("suggestion ok:", JSON.stringify(calls.at(-1)[2]));
 
-  // 7. Outside edit mode, tapping a device opens Home Assistant's details.
+  // 7. Outside edit mode, tapping a device opens its details popup; "More info" there opens Home Assistant's dialog.
   await page.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
   const tvNow = await center(discOf(tv)); // the edit banner is gone, so the map moved up
   await page.mouse.click(tvNow.x, tvNow.y);
+  const info = card.locator(".pop .info");
+  await info.waitFor();
+  assert.strictEqual((await info.textContent()).trim(), "More info", "tap opens the details popup");
+  await info.click();
   const opened = await page.evaluate(() => window.moreInfo);
-  assert.ok(opened && opened.startsWith("sensor.netorbit_"), "tap opens details");
-  console.log("more-info ok:", opened);
+  assert.ok(opened && opened.startsWith("sensor.netorbit_"), "More info opens Home Assistant's details");
+  console.log("details + more-info ok:", opened);
 
   // 8. Touch: drag with a finger on a phone sized screen.
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -763,15 +767,17 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
   //      a pinch zooms. The events go through Chrome's DevTools protocol so the browser applies touch-action itself.
   if (IS_WEBKIT) {
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await p.evaluate(() => document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)));
     const tvKey = await keyOfIn(p, "Bedroom TV");
     await p.locator("netorbit-card").locator(`.node[data-key="${tvKey}"] circle.disc`).tap();
-    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    const details = p.locator("netorbit-card").locator(".pop .info");
+    await details.waitFor();
+    assert.ok(await details.isVisible(), "a tap on a device opens its details on a phone");
+    await p.locator("netorbit-card").locator(".pop .x").tap();
     console.log("phone tap ok (WebKit; swipe and pinch need Chrome's DevTools protocol and run in Chromium only)");
     await p.close();
   } else {
     const p = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-    await p.evaluate(() => { document.body.style.paddingBottom = "2400px"; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
+    await p.evaluate(() => { document.body.style.paddingBottom = "2400px"; });
     const cdp = await p.context().newCDPSession(p);
     const touch = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map((q, i) => ({ x: q.x, y: q.y, id: i })) });
     const wait = (ms) => p.waitForTimeout(ms);
@@ -788,8 +794,11 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const tvKey = await keyOfIn(p, "Bedroom TV");
     const tv = await centerIn(p, `.node[data-key="${tvKey}"] circle.disc`);
     await touch("touchStart", [tv]); await wait(40); await touch("touchEnd", []); await wait(250);
-    assert.ok(await p.evaluate(() => window.moreInfo), "a tap on a device opens its details on a phone");
+    const details = p.locator("netorbit-card").locator(".pop .info");
+    await details.waitFor();
+    assert.ok(await details.isVisible(), "a tap on a device opens its details on a phone");
     assert.strictEqual(await viewBox(p), whole, "a tap does not move the map");
+    await p.locator("netorbit-card").locator(".pop .x").tap(); // back to the plain map for the swipe and pinch below
 
     // One finger swiping up over the whole map scrolls the page.
     assert.strictEqual(await p.evaluate(() => window.scrollY), 0);
@@ -1110,6 +1119,29 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     assert.strictEqual((await ws()).length, wsBefore, "no entity rename when NetOrbit's own save failed");
     console.log("rename errors ok");
 
+    // The details popup outside Edit layout renames a device the same way, after saving its fields.
+    await rp.evaluate(() => { window.callFail = null; });
+    await c8.locator(".editbtn").click();
+    const wsNow = (await ws()).length;
+    await open();
+    await c8.locator(".pop .ed").click();
+    await c8.locator(".pop input.name").fill("Lounge TV");
+    await c8.locator(".pop .save").click();
+    await rp.waitForFunction((n) => window.wsCalls.length === n + 1, wsNow);
+    const sent = (await calls()).slice(-2);
+    assert.deepStrictEqual(sent.map((c) => c[1]), ["update_device", "track_device"], "details Edit saves the fields, then renames");
+    assert.strictEqual(sent[1][2].name, "Lounge TV", "NetOrbit's own name is saved");
+    assert.strictEqual((await ws()).at(-1).name, "Lounge TV", "the name set in Home Assistant follows");
+    await shows("Lounge TV");
+    const untouched = (await calls()).length;
+    await open();
+    await c8.locator(".pop .ed").click();
+    await c8.locator(".pop .save").click();
+    assert.strictEqual((await calls()).length, untouched + 1, "an untouched name sends only the fields");
+    assert.strictEqual((await calls()).at(-1)[1], "update_device");
+    await c8.locator(".editbtn").click();
+    console.log("details rename ok");
+
     // On a phone the menu, with its Name field, fits on the map.
     const rph = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
     await rph.goto(BASE + "/scripts/preview/index.html?s=novice");
@@ -1127,6 +1159,87 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     console.log("phone menu ok");
     await rph.close();
     await rp.close();
+  }
+
+  // 18. Balloon layout and branches: the Radial | Balloon switch (remembered), long-press a hub for its branch, the
+  //     grey hub above it and the row under the header lead back up, and Share follows the layout on show.
+  {
+    const bp = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+    bp.on("pageerror", (e) => { console.error("PAGE ERROR", e.message); process.exitCode = 1; });
+    await bp.goto(BASE + "/scripts/preview/index.html?s=chain");
+    await bp.waitForFunction(() => window.ready);
+    const cb = bp.locator("netorbit-card");
+    const key = (l) => bp.evaluate((x) => Object.values(window.NETORBIT_SCENARIOS.chain).find((s) => s.attributes.label === x).attributes.node_key, l);
+    const crumbs = () => cb.locator(".crumbs").count().then((n) => (n ? cb.locator(".crumbs").innerText().then((t) => t.replace(/\s+/g, " ").trim()) : ""));
+    const press = async (label) => {
+      const b = await cb.locator(`.node[data-key="${await key(label)}"] circle.disc`).boundingBox();
+      await bp.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await bp.mouse.down();
+      await bp.waitForTimeout(750);
+      await bp.mouse.up();
+      await bp.waitForTimeout(300);
+    };
+    const viewBox = () => cb.locator("svg.map").getAttribute("viewBox").then((v) => v.split(" ").map(Number).join(" "));
+    assert.ok(await cb.locator(".lay button[data-l=radial].on").count(), "radial by default");
+    assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
+    await cb.locator(".lay button[data-l=balloon]").click();
+    assert.ok(await cb.locator(".lay button[data-l=balloon].on").count(), "balloon picked");
+    assert.notStrictEqual(await viewBox(), "-70 -40 1140 1090", "the balloon map has a view of its own");
+    assert.strictEqual(await cb.locator(".ring").count(), 0, "no router ring on the balloon map");
+    const saved = () => bp.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("netorbit-layout")).map((k) => [k, localStorage.getItem(k)]));
+    const picks = await saved();
+    assert.strictEqual(picks.length, 1, "one saved pick");
+    assert.ok(picks[0][0] !== "netorbit-layout" && picks[0][1] === "balloon", "remembered for this card, not site-wide");
+    // Reloaded, the same card remembers it.
+    await bp.reload();
+    await bp.waitForFunction(() => window.ready);
+    assert.ok(await cb.locator(".lay button[data-l=balloon].on").count(), "balloon remembered after a reload");
+    // The drag ghost waits off the map, which in the balloon layout runs into negative coordinates.
+    const ghost = await cb.locator(".ghost").evaluate((g) => [Number(g.getAttribute("cx")), Number(g.getAttribute("cy"))]);
+    const [vx, vy] = (await viewBox()).split(" ").map(Number);
+    assert.ok(ghost[0] < vx && ghost[1] < vy, "drag ghost off the map");
+    // Share follows the layout on show.
+    const share = await bp.evaluate(() => document.querySelector("netorbit-card").shareSvg(true));
+    assert.ok(!share.includes('class="ring"') && !share.includes('viewBox="-70 -40 1140 1090"'), "the share image is the balloon map");
+    // Long-press a hub: just its branch, with the hub above it in grey.
+    await press("Rack Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
+    assert.ok(await cb.locator(`.node.up[data-key="${await key("Router")}"]`).count(), "the router hangs off the branch in grey");
+    assert.strictEqual(await cb.locator(`.node[data-key="${await key("Downstairs AP")}"]`).count(), 0, "other branches left out");
+    assert.strictEqual(await bp.evaluate(() => (window.calls || []).length), 0, "a long-press opens nothing");
+    await press("Shed Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
+    // The tap straight after a long-press is a real tap: it opens the device's details (and More info there opens the
+    // device), not swallowed by the press before it.
+    await bp.evaluate(() => { window.moreInfo = null; document.addEventListener("hass-more-info", (e) => (window.moreInfo = e.detail.entityId)); });
+    await cb.locator(`.node[data-key="${await key("Shed Pi")}"] circle.disc`).click();
+    const shedInfo = cb.locator(".pop .info");
+    await shedInfo.waitFor({ timeout: 3000 }).catch(() => {});
+    assert.ok(await shedInfo.count(), "a tap right after a long-press opens the device's details");
+    await shedInfo.click();
+    assert.ok(await bp.evaluate(() => window.moreInfo), "a tap right after a long-press opens the device");
+    // Long-press the grey hub to go up a level; the row under the header goes back to the whole map.
+    await press("Rack Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch");
+    await cb.locator(".crumbs .cr.back").click();
+    assert.strictEqual(await crumbs(), "", "whole map again");
+    // The radial map has branches too.
+    await cb.locator(".lay button[data-l=radial]").click();
+    await press("Shed Switch");
+    assert.strictEqual(await crumbs(), "Whole map Router › Rack Switch › Shed Switch");
+    assert.strictEqual(await viewBox(), "-70 -40 1140 1090");
+    await cb.locator(".lay button[data-l=balloon]").click();
+    // Another card, set to radial with no switch, stays radial whatever was picked on the first one.
+    await bp.goto(BASE + "/scripts/preview/index.html?s=chain&cfg=" + encodeURIComponent(JSON.stringify({ layout: "radial", layout_toggle: false })));
+    await bp.waitForFunction(() => window.ready);
+    assert.strictEqual(await cb.locator(".lay").count(), 0, "no switch");
+    assert.strictEqual(await viewBox(), "-70 -40 1140 1090", "the card's own layout wins");
+    // A card whose `layout` changes starts from it, not from a pick made before.
+    await bp.goto(BASE + "/scripts/preview/index.html?s=chain&cfg=" + encodeURIComponent(JSON.stringify({ layout: "balloon" })));
+    await bp.waitForFunction(() => window.ready);
+    assert.ok(await cb.locator(".lay button[data-l=balloon].on").count(), "layout: balloon shows balloon");
+    console.log("balloon layout and branches ok");
+    await bp.close();
   }
 
   await browser.close();

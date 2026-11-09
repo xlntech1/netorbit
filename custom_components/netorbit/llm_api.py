@@ -164,10 +164,13 @@ def _tools() -> list[llm.Tool]:
         ),
         _Tool(
             "netorbit_update_hub",
-            "Rename a hub, change its type, or change which hub it connects to.",
+            "Rename a hub, change its type, or change which hub it connects to. managed_by is free text (a URL or the "
+            "name of the thing that manages it); fields is {label: value} of extra notes, an empty value removes a label.",
             vol.Schema({vol.Required("hub"): cv.string, vol.Optional("name"): cv.string,
-                        vol.Optional("type"): hub_type, vol.Optional("parent"): cv.string}),
-            lambda h, e, c, a: actions.update_hub(h, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent")),
+                        vol.Optional("type"): hub_type, vol.Optional("parent"): cv.string,
+                        vol.Optional("managed_by"): cv.string, vol.Optional("fields"): {cv.string: vol.Any(None, cv.string)}}),
+            lambda h, e, c, a: actions.update_hub(h, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent"),
+                                                  managed_by=a.get("managed_by"), fields=a.get("fields")),
         ),
         _Tool(
             "netorbit_remove_hub",
@@ -190,10 +193,14 @@ def _tools() -> list[llm.Tool]:
         ),
         _Tool(
             "netorbit_update_device",
-            "Rename a device, set its icon (mdi:...), or mark it as allowed to sleep (no offline alerts).",
+            "Rename a device, set its icon (mdi:...), or mark it as allowed to sleep (no offline alerts). managed_by is "
+            "free text (a URL or the name of the thing that manages it); fields is {label: value} of extra notes, an "
+            "empty value removes a label.",
             vol.Schema({vol.Required("device"): cv.string, vol.Optional("name"): cv.string,
-                        vol.Optional("icon"): cv.string, vol.Optional("allowed_to_sleep"): cv.boolean}),
-            lambda h, e, c, a: actions.update_device(h, e, c, a["device"], a.get("name"), a.get("icon"), a.get("allowed_to_sleep")),
+                        vol.Optional("icon"): cv.string, vol.Optional("allowed_to_sleep"): cv.boolean,
+                        vol.Optional("managed_by"): cv.string, vol.Optional("fields"): {cv.string: vol.Any(None, cv.string)}}),
+            lambda h, e, c, a: actions.update_device(h, e, c, a["device"], a.get("name"), a.get("icon"), a.get("allowed_to_sleep"),
+                                                     managed_by=a.get("managed_by"), fields=a.get("fields")),
         ),
         _Tool(
             "netorbit_ignore_device",
