@@ -33,6 +33,7 @@ from .const import (
     CONF_IGNORED,
     CONF_MODE,
     CONF_PING_INTERVAL,
+    CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
     DEFAULT_STALE_HOURS,
     DOMAIN,
@@ -98,7 +100,8 @@ SWEEP_TIMEOUT = 1.0
 DNS_TIMEOUT = 2.0
 DNS_REFRESH = timedelta(hours=12)
 # Bump when the way names are looked up changes, so existing installs look again right away.
-NAME_LOOKUP_VERSION = 2
+# 3: the full DNS name is kept as well as the short label.
+NAME_LOOKUP_VERSION = 3
 AUTO_PLACEMENT_TTL = timedelta(days=7)
 SNMP_CONCURRENCY = 32
 
@@ -129,6 +132,9 @@ class Node:
     placement: str = PLACE_NONE  # manual | controller | snmp | none
     hub_source: str | None = None  # for hubs: manual | snmp | controller | detected
     ip_changes: int = 0  # how often DHCP has moved it since NetOrbit started tracking
+    fqdn: str | None = None  # full reverse DNS name, when the network publishes one
+    managed_by: str | None = None  # free text: a URL, or the name of the thing on the map that manages it
+    fields: dict[str, str] = field(default_factory=dict)  # more free text, label -> value
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -158,13 +164,14 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
+    opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
     opts.setdefault(CONF_HUBS, [])
     opts.setdefault(CONF_DEVICES, {})
     opts.setdefault(CONF_IGNORED, [])
     opts.setdefault(CONF_DISMISSED_HUBS, [])
     if not any(h.get("id") == ROOT_HUB_ID for h in opts[CONF_HUBS]):
         opts[CONF_HUBS] = [
-            {"id": ROOT_HUB_ID, "name": "Router", "host": entry.data[CONF_GATEWAY], "type": HUB_ROUTER, "parent": None},
+            {"id": ROOT_HUB_ID, "name": "Router", "host": entry.data[CONF_GATEWAY], "type": HUB_ROUTER, "parent": None, "name_auto": True},
             *opts[CONF_HUBS],
         ]
     return opts
@@ -606,6 +613,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 except (TimeoutError, asyncio.TimeoutError):
                     name = None
                 host = short_hostname(name)
+                fqdn = name.strip().rstrip(".") if host and name else None
                 if not host:
                     # Many routers don't publish local names. Ask the device itself over Bonjour.
                     host = mdns_label(await mdns_name(ip))
@@ -614,6 +622,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 rec["dns_version"] = NAME_LOOKUP_VERSION
                 if host:
                     rec["hostname"] = host
+                if fqdn:
+                    rec["fqdn"] = fqdn
+                else:
+                    rec.pop("fqdn", None)
 
         await asyncio.gather(*(one(k, ip) for k, ip in todo))
 
@@ -832,6 +844,30 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         vendor = rec.get("vendor")
         return f"{vendor} {kind} {mac[-5:].upper()}" if vendor else f"{kind.capitalize()} {mac[-5:].upper()}"
 
+    def _hub_record(self, hub: dict[str, Any]) -> dict[str, Any]:
+        """What the sweep knows about the hub's address: its own device record, found by MAC."""
+        mac = hub.get("mac") or (self._seen.get(f"hub:{hub['id']}") or {}).get("mac")
+        return (self._seen.get(mac) if mac else None) or {}
+
+    def _hub_display_name(self, hub: dict[str, Any], rec: dict[str, Any]) -> str:
+        """The stored name, or the network's DNS/Bonjour name when the stored one was made up.
+
+        Hubs from before name_auto existed count as made up when they still carry the name
+        NetOrbit would generate today (the root's "Router", a detected hub's vendor + kind + MAC).
+        """
+        name = hub.get("name") or hub["id"]
+        if not self.opts.get(CONF_PREFER_DNS) or not rec.get("hostname"):
+            return name
+        auto = hub.get("name_auto")
+        if auto is None:
+            if hub["id"] == ROOT_HUB_ID:
+                auto = name == "Router"
+            elif hub.get("source", "manual") != "manual" and rec.get("mac"):
+                auto = name == self._hub_name(rec["mac"], rec, hub.get("type"))
+            else:
+                auto = False
+        return rec["hostname"] if auto else name
+
     # ----- layout ----------------------------------------------------------------
 
     def _infer_layout(self, now: datetime) -> None:
@@ -953,6 +989,9 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
     def _discovered_name(self, key: str, rec: dict[str, Any]) -> str:
         mac = rec.get("mac")
+        if self.opts.get(CONF_PREFER_DNS) and rec.get("hostname"):
+            # The network's own name for it beats what other integrations call it.
+            return rec["hostname"]
         if mac:
             reg = self._registry.get(mac)
             if reg and reg.name:
@@ -991,15 +1030,18 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 parent = ROOT_HUB_ID
             if parent == hub["id"]:
                 parent = ROOT_HUB_ID
+            own = self._hub_record(hub)
             nodes[key] = Node(
-                key=key, kind="hub", name=hub.get("name") or hub["id"], ip=hub.get("host"),
+                key=key, kind="hub", name=self._hub_display_name(hub, own), ip=hub.get("host"),
                 mac=hub.get("mac") or rec.get("mac"),
                 icon=hub.get("icon") or HUB_ICONS.get(hub.get("type", HUB_OTHER), "mdi:lan"),
                 link=parent, status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
+                hostname=own.get("hostname"), fqdn=own.get("fqdn"),
                 source="hub", hub_type=hub.get("type", HUB_OTHER), hub_source=hub.get("source", "manual"),
                 ip_changes=rec.get("ip_changes", 0),
-                vendor=(self._seen.get(hub.get("mac") or "") or {}).get("vendor"),
+                vendor=own.get("vendor"),
+                **manage.stored_text(hub),
             )
         if self._tables or self._ap_clients:
             sources.add(PLACE_SNMP)
@@ -1024,8 +1066,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 link=hub, sleepy=bool(cfg.get("sleepy", False)),
                 status=self._status(key in alive_keys, rec, now, stale_after),
                 last_seen=rec.get("last_seen"), first_seen=rec.get("first_seen"),
-                hostname=rec.get("hostname"), source="manual" if key in devices else "discovered",
+                hostname=rec.get("hostname"), fqdn=rec.get("fqdn"),
+                source="manual" if key in devices else "discovered",
                 vendor=rec.get("vendor"), placement=placement, ip_changes=rec.get("ip_changes", 0),
+                **manage.stored_text(cfg),
             )
 
         # A hub with no address (an unmanaged switch, an AP in bridge mode) can't be pinged,

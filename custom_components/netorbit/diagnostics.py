@@ -36,6 +36,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
                     "source": node.source,
                     "placement": node.placement,
                     "hub_type": node.hub_type,
+                    "has_fqdn": bool(node.fqdn),
+                    "has_managed_by": bool(node.managed_by),
+                    "field_count": len(node.fields),
                 }
             )
     return {

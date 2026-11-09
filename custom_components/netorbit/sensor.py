@@ -111,11 +111,14 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
             "last_seen": node.last_seen,
             "first_seen": node.first_seen,
             "hostname": node.hostname,
+            "fqdn": node.fqdn,
             "source": node.source,
             "vendor": node.vendor,
             "placement": node.placement if node.kind == "device" else None,
             "hub_source": node.hub_source,
             "ip_changes": node.ip_changes,
+            "managed_by": node.managed_by,
+            "fields": dict(node.fields),
         }
 
     @callback

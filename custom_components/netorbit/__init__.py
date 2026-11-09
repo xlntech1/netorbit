@@ -31,6 +31,7 @@ from .const import (
     SERVICE_RESET,
     SERVICE_SCAN,
     SERVICE_TRACK,
+    SERVICE_UPDATE_DEVICE,
     SERVICE_UPDATE_HUB,
     SERVICE_EXPORT,
     SERVICE_IMPORT,
@@ -48,6 +49,10 @@ type NetOrbitConfigEntry = ConfigEntry[NetOrbitCoordinator]
 
 ENTRY = {vol.Optional("config_entry_id"): cv.string}
 DEVICE_LIST = vol.All(cv.ensure_list, [cv.string])
+# Free text per hub or device: {label: value}; a null or empty value removes that label.
+FIELDS = vol.Schema({cv.string: vol.Any(None, cv.string)})
+# "Managed by" and extra fields, accepted by update_device and update_hub.
+TEXT_FIELDS = {vol.Optional("managed_by"): cv.string, vol.Optional("fields"): FIELDS}
 
 SCHEMAS: dict[str, vol.Schema] = {
     SERVICE_TRACK: vol.Schema({**ENTRY, vol.Optional("mac"): cv.string, vol.Optional("ip"): cv.string,
@@ -65,7 +70,10 @@ SCHEMAS: dict[str, vol.Schema] = {
     SERVICE_EXPORT: vol.Schema(ENTRY),
     SERVICE_IMPORT: vol.Schema({**ENTRY, vol.Required("data"): dict, vol.Optional("replace", default=False): cv.boolean}),
     SERVICE_UPDATE_HUB: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Optional("name"): cv.string,
-                                    vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("parent"): cv.string}),
+                                    vol.Optional("type"): vol.In(HUB_TYPES), vol.Optional("parent"): cv.string, **TEXT_FIELDS}),
+    SERVICE_UPDATE_DEVICE: vol.Schema({**ENTRY, vol.Required("device"): cv.string, vol.Optional("name"): cv.string,
+                                       vol.Optional("icon"): vol.Any("", cv.icon), vol.Optional("sleepy"): cv.boolean,
+                                       vol.Optional("hub"): cv.string, **TEXT_FIELDS}),
     SERVICE_IMPORT_LIST: vol.Schema({**ENTRY, vol.Required("hub"): cv.string, vol.Required("text"): cv.string,
                                      vol.Optional("add_missing", default=True): cv.boolean}),
     SERVICE_CONFIRM_HUB: vol.Schema({**ENTRY, vol.Required("device"): cv.string, vol.Optional("assign"): DEVICE_LIST,
@@ -108,7 +116,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         SERVICE_REMOVE_HUB: lambda e, c, a: actions.remove_hub(hass, e, c, a["hub"]),
         SERVICE_EXPORT: _export,
         SERVICE_IMPORT: lambda e, c, a: actions.import_config(hass, e, c, a["data"], a["replace"]),
-        SERVICE_UPDATE_HUB: lambda e, c, a: actions.update_hub(hass, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent")),
+        SERVICE_UPDATE_HUB: lambda e, c, a: actions.update_hub(hass, e, c, a["hub"], name=a.get("name"), type=a.get("type"), parent=a.get("parent"),
+                                                                managed_by=a.get("managed_by"), fields=a.get("fields")),
+        SERVICE_UPDATE_DEVICE: lambda e, c, a: actions.update_device(hass, e, c, a["device"], name=a.get("name"), icon=a.get("icon"),
+                                                                      sleepy=a.get("sleepy"), hub=a.get("hub"),
+                                                                      managed_by=a.get("managed_by"), fields=a.get("fields")),
         SERVICE_IMPORT_LIST: lambda e, c, a: actions.import_list(hass, e, c, a["hub"], a["text"], a["add_missing"]),
         SERVICE_CONFIRM_HUB: lambda e, c, a: actions.confirm_hub(hass, e, c, a["device"], a.get("type"), a.get("name"), a.get("assign")),
         SERVICE_DISMISS_HUB: lambda e, c, a: actions.dismiss_hub(hass, e, c, a["device"]),
@@ -127,6 +139,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: NetOrbitConfigEntry) -> bool:
     """Set up NetOrbit from a config entry."""
     coordinator = NetOrbitCoordinator(hass, entry)
+    entry.runtime_data = coordinator
+    # Listen before the first sweep: it may save options itself (a hub's MAC, a DHCP move), and
+    # the listener is what clears the "that was me" flag. Registered later, the flag stayed set
+    # and the first change a person made afterwards was ignored.
+    entry.async_on_unload(entry.add_update_listener(_options_updated))
     await coordinator.async_load()
     # The first refresh draws the map from what NetOrbit saved and pings only those devices.
     # The full network scan runs in the background once setup is done, so Home Assistant's
@@ -137,8 +154,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: NetOrbitConfigEntry) -> 
     finally:
         coordinator.defer_sweep = False
     coordinator.set_scan(notify=False, scanning=True, phase="starting")
-    entry.runtime_data = coordinator
-    entry.async_on_unload(entry.add_update_listener(_options_updated))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, coordinator.async_background_sweep(), f"{DOMAIN} first network scan")
     return True
