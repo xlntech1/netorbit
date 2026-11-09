@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+### Added
+- **Tap a hub or device for its details.** Outside Edit layout, a tap opens a NetOrbit popup with the DNS name, IP, MAC, maker, the hub it connects through and how it was placed, when it was first and last seen, and any text you attached to it. *More info* still opens Home Assistant's own dialog. Admins get *Edit* there to change the name, *Managed by* and the extra fields.
+- **Managed by and extra fields.** Every hub and device can carry a *Managed by* line (a link, or the name of another hub or device on the map, which the popup then jumps to) and up to 20 extra fields (`Label: value`). Set them from the details popup, the integration's *Edit* forms, the new `netorbit.update_device` service, `netorbit.update_hub`, or an AI assistant. Exports include them, and an import checks them the same way (anything that fails is left out and counted).
+- **Prefer DNS and Bonjour names** (Settings, off by default). The name your network gives a device comes first, before names from other integrations, and replaces names NetOrbit made up for hubs, such as *Router*. Names you typed are kept. Every sensor now also carries the full DNS name as `fqdn`.
+- **Balloon layout.** A Radial | Balloon switch in the card header. In the balloon layout every hub sits in the middle of its own ring of devices, and hubs below it branch away from it, each with room for everything under it. A chain of switches (one feeding the next) becomes a line of hubs instead of piling up beside the router, busy access points get a circle each, and the map is turned to fill the card's width. The card option `layout: balloon` makes it the card's layout, and `layout_toggle: false` hides the switch, so the card always shows its `layout`. A pick in the switch is remembered in that browser for that card only, and editing the card's options starts it again from its `layout`. The radial map is unchanged and stays the default. Share (image and video) uses whichever layout is on show; a balloon share gets a frame of the map's own shape (thanks @ninchistudios, #66).
+- **Show one branch on its own.** Long-press a hub with something below it to see just that hub, the hubs under it and their devices, in either layout. The hub above the branch hangs off it in grey ("Up a level"): long-press it, or the middle hub, to go up a level. A row under the header also leads back up (Whole map, or any hub on the way). The counts in the header are for the branch on show (thanks @ninchistudios, #66).
+
 ### Fixed
+- The first change made in Settings after a restart was ignored when NetOrbit had saved something itself during its first sweep (a hub's MAC address, a DHCP move).
+- Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
+- **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
+- A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
 - **"+N more" no longer hides devices with problems.** On a map past `max_devices`, a hub with more devices needing attention than its share folded some of them into the bubble, although its tooltip says devices with problems are always shown. Devices not seen or only seen recently, new devices and possible hubs now always stay on the map, and a bubble that would hold a single device is not drawn.
+
+## 0.3.1
+
+### Changed
+- **Releases now carry `netorbit.zip`.** Each release attaches the integration as a zip, and HACS and the Marketplace install from it. This gives NetOrbit a download count in both stores. The count starts with the first release that has the zip and includes updates, so it runs higher than the number of users.
 
 ## 0.3.0
 
@@ -19,6 +35,9 @@
 - **Assistant tools on Home Assistant 2026.10.** NetOrbit's AI assistant tools now answer in the format Home Assistant 2026.10 expects (thanks @xlntech1, #30). No more deprecation warning on every call, and they keep working after 2027.11, when the old format stops being accepted. Older Home Assistant versions work as before.
 - **The assistant tool that undoes hand placement** (`netorbit_reset_placement`) is now marked destructive, since those placements can only be set again by hand (thanks @xlntech1, #52).
 - **Saved videos start right away** and end without the long pause at the start and end (#29).
+
+### Known issues
+- **Devices that left before you upgraded may show online.** If a device left before 0.3.0 and its address has since gone to another device, it can stay online, because the #47 check needs an address saved by 0.3.0. To clear it, open the device under the integration's Configure menu and choose "Stop tracking and ignore this device", or call `netorbit.ignore_device`. This happens only once: devices that leave from now on go offline as #47 describes (thanks @ninchistudios, #65).
 
 ## 0.2.10
 

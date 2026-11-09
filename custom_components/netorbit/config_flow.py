@@ -23,6 +23,7 @@ from .const import (
     CONF_IGNORED,
     CONF_MODE,
     CONF_PING_INTERVAL,
+    CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
     CONF_STALE_HOURS,
@@ -214,6 +215,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_CHECK_INTERNET: user_input[CONF_CHECK_INTERNET],
                     CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
                     CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
+                    CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
                 }
             )
             return self._save()
@@ -228,6 +230,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_AUTO_HUBS, default=o[CONF_AUTO_HUBS]): bool,
                 vol.Required(CONF_GROUP_BY_TYPE, default=o[CONF_GROUP_BY_TYPE]): bool,
                 vol.Required(CONF_CHECK_INTERNET, default=o[CONF_CHECK_INTERNET]): bool,
+                vol.Required(CONF_PREFER_DNS, default=o[CONF_PREFER_DNS]): bool,
                 vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
                 vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
                     sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
@@ -246,6 +249,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
         }
         if not root:
             fields[vol.Required("parent", default=hub.get("parent") or ROOT_HUB_ID)] = _select(self._hub_choices(exclude))
+        fields.update(_text_fields(hub))
         return vol.Schema(fields)
 
     async def async_step_add_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -256,11 +260,17 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 errors["host"] = "invalid_ip"
             else:
                 try:
-                    manage.add_hub(self.opts, user_input["name"], user_input["type"], user_input["parent"], host, None, source="manual")
+                    result = manage.add_hub(self.opts, user_input["name"], user_input["type"], user_input["parent"], host, None, source="manual")
                 except manage.ManageError:
                     errors["host"] = "hub_exists"
                 else:
-                    return self._save()
+                    try:
+                        manage.set_fields(manage.hub_by_id(self.opts, result["hub"]), *_text_values(user_input))
+                    except manage.ManageError:
+                        self.opts[CONF_HUBS] = [h for h in self.opts[CONF_HUBS] if h["id"] != result["hub"]]
+                        errors["fields_text"] = "bad_fields"
+                    else:
+                        return self._save()
         return self.async_show_form(step_id="add_hub", data_schema=self._hub_schema({}, None, False), errors=errors)
 
     async def async_step_edit_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -288,8 +298,15 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 fields = {"name": user_input["name"], "host": host, "type": user_input["type"]}
                 if not root and user_input["parent"] != hub.get("parent"):
                     fields["parent"] = user_input["parent"]
-                manage.update_hub(self.opts, hub["id"], **fields)
-                return self._save()
+                try:
+                    managed_by, new_fields = _text_values(user_input)
+                    # The form shows every field, so what comes back is the whole list: drop the rest.
+                    fields["fields"] = {**{k: None for k in hub.get("fields") or {}}, **new_fields}
+                    manage.update_hub(self.opts, hub["id"], managed_by=managed_by, **fields)
+                except manage.ManageError:
+                    errors["fields_text"] = "bad_fields"
+                else:
+                    return self._save()
         schema = self._hub_schema(hub, hub["id"], root)
         if not root:
             schema = schema.extend({vol.Optional("remove", default=False): bool})
@@ -308,6 +325,7 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 [{"value": AUTO_VALUE, "label": "Automatic"}, *self._hub_choices()]
             ),
             vol.Required("sleepy", default=bool(cfg.get("sleepy", False))): bool,
+            **_text_fields(cfg),
         }
 
     async def async_step_add_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -324,14 +342,19 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 errors["base"] = "pick_or_ip"
                 key = None
             if key:
-                cfg = self.opts[CONF_DEVICES].setdefault(key, {})
-                cfg.update(_clean_device(user_input))
-                cfg["tracked"] = True
-                if host:
-                    cfg["host"] = host
-                if key in self.opts[CONF_IGNORED]:
-                    self.opts[CONF_IGNORED].remove(key)
-                return self._save()
+                try:
+                    cleaned = _clean_device(user_input)
+                except manage.ManageError:
+                    errors["fields_text"] = "bad_fields"
+                else:
+                    cfg = self.opts[CONF_DEVICES].setdefault(key, {})
+                    cfg.update(cleaned)
+                    cfg["tracked"] = True
+                    if host:
+                        cfg["host"] = host
+                    if key in self.opts[CONF_IGNORED]:
+                        self.opts[CONF_IGNORED].remove(key)
+                    return self._save()
         choices = [{"value": NONE_VALUE, "label": "Enter an IP address instead"}, *self._untracked_choices()]
         schema = vol.Schema(
             {
@@ -358,24 +381,31 @@ class NetOrbitOptionsFlow(OptionsFlow):
         cfg = dict(self.opts[CONF_DEVICES].get(key, {}))
         coord = self._coordinator()
         node = coord.data.nodes.get(key) if coord and coord.data else None
+        errors: dict[str, str] = {}
         if user_input is not None:
             if user_input.get("stop_tracking"):
                 self.opts[CONF_DEVICES].pop(key, None)
                 if key not in self.opts[CONF_IGNORED]:
                     self.opts[CONF_IGNORED].append(key)
                 return self._save()
-            new_cfg = self.opts[CONF_DEVICES].setdefault(key, {})
-            new_cfg.update(_clean_device(user_input))
-            for field in ("name", "icon"):
-                if not user_input.get(field):
-                    new_cfg.pop(field, None)
-            if user_input.get("hub") in (None, AUTO_VALUE):
-                manage.reset_placement(self.opts, [key])
-            new_cfg["tracked"] = True
-            return self._save()
+            try:
+                cleaned = _clean_device(user_input)
+            except manage.ManageError:
+                errors["fields_text"] = "bad_fields"
+            else:
+                new_cfg = self.opts[CONF_DEVICES].setdefault(key, {})
+                new_cfg.update(cleaned)
+                # The form shows everything, so an emptied box means "remove".
+                for field in ("name", "icon", "managed_by", "fields"):
+                    if not cleaned.get(field):
+                        new_cfg.pop(field, None)
+                if user_input.get("hub") in (None, AUTO_VALUE):
+                    manage.reset_placement(self.opts, [key])
+                new_cfg["tracked"] = True
+                return self._save()
         schema = vol.Schema({**self._device_fields(cfg), vol.Optional("stop_tracking", default=False): bool})
         return self.async_show_form(
-            step_id="edit_device_details", data_schema=schema,
+            step_id="edit_device_details", data_schema=schema, errors=errors,
             description_placeholders={"device": node.name if node else key, "ip": (node.ip if node else None) or "unknown"},
         )
 
@@ -464,7 +494,24 @@ def _clean_device(user_input: dict[str, Any]) -> dict[str, Any]:
         out["name"] = user_input["name"].strip()
     if user_input.get("icon"):
         out["icon"] = user_input["icon"]
+    managed_by, fields = _text_values(user_input)
+    manage.set_fields(out, managed_by, fields)
     return out
+
+
+def _text_fields(cfg: dict[str, Any]) -> dict[Any, Any]:
+    """Form boxes for Managed by and the extra fields, filled with what is set now."""
+    return {
+        vol.Optional("managed_by", description={"suggested_value": cfg.get("managed_by")}): str,
+        vol.Optional("fields_text", description={"suggested_value": manage.fields_to_text(cfg.get("fields")) or None}): sel.TextSelector(
+            sel.TextSelectorConfig(multiline=True)
+        ),
+    }
+
+
+def _text_values(user_input: dict[str, Any]) -> tuple[str, dict[str, str]]:
+    """(managed_by, fields) from the form. Raises ManageError on a line that is not 'Label: value'."""
+    return (user_input.get("managed_by") or "").strip(), manage.parse_fields_text(user_input.get("fields_text"))
 
 
 def _valid_ip(value: str) -> bool:
