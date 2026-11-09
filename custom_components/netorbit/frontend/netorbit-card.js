@@ -48,7 +48,7 @@ function noFold(devices, max) {
   const kept = [];
   Object.entries(byHub).forEach(([hub, list]) => {
     // Possible hubs first (they need a tap), then problems, then the rest.
-    list.sort((a, b) => (!!b.suggested - !!a.suggested) || ((rank[a.status] ?? 3) - (rank[b.status] ?? 3)) || String(a.label).localeCompare(String(b.label)));
+    list.sort((a, b) => (!!b.suggested - !!a.suggested) || ((a.status in rank ? rank[a.status] : 3) - (b.status in rank ? rank[b.status] : 3)) || String(a.label).localeCompare(String(b.label)));
     if (list.length <= share) { kept.push(...list); return; }
     const must = list.filter(noFoldKeeps);
     const others = list.filter((d) => !noFoldKeeps(d));
