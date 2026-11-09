@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "netorbit"
-VERSION: Final = "0.3.0"
+VERSION: Final = "0.3.1"
 
 # Config entry data
 CONF_SUBNET: Final = "subnet"
@@ -26,6 +26,7 @@ CONF_SNMP_ENABLED: Final = "snmp_enabled"
 CONF_SNMP_COMMUNITY: Final = "snmp_community"
 CONF_GROUP_BY_TYPE: Final = "group_by_type"
 CONF_CHECK_INTERNET: Final = "check_internet"
+CONF_PREFER_DNS: Final = "prefer_dns_names"
 
 MODE_AUTO: Final = "auto"
 MODE_MANUAL: Final = "manual"
@@ -38,7 +39,13 @@ DEFAULT_STALE_HOURS: Final = 24
 DEFAULT_IGNORE_RANDOM_MAC: Final = True
 DEFAULT_AUTO_HUBS: Final = True
 DEFAULT_SNMP_ENABLED: Final = True
+DEFAULT_PREFER_DNS: Final = False
 SNMP_DEFAULT_COMMUNITY: Final = "public"
+
+# Free text people attach to a hub or device ("Managed by", extra fields)
+MAX_FIELDS: Final = 20
+MAX_FIELD_LABEL: Final = 40
+MAX_FIELD_VALUE: Final = 500
 SNMP_PROBE_INTERVAL_S: Final = 3600
 
 MIN_PING_INTERVAL: Final = 10
@@ -93,6 +100,7 @@ SERVICE_ASSIGN: Final = "assign_device"
 SERVICE_ADD_HUB: Final = "add_hub"
 SERVICE_REMOVE_HUB: Final = "remove_hub"
 SERVICE_UPDATE_HUB: Final = "update_hub"
+SERVICE_UPDATE_DEVICE: Final = "update_device"
 SERVICE_EXPORT: Final = "export_config"
 SERVICE_IMPORT: Final = "import_config"
 SERVICE_IMPORT_LIST: Final = "import_client_list"

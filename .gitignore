@@ -7,3 +7,7 @@ scripts/preview/mdi.js
 .DS_Store
 scripts/preview/_simstates/
 scripts/preview/_video/
+
+# Local Claude Code settings and personal notes. A shared CLAUDE.md is fine.
+.claude/
+CLAUDE.local.md
