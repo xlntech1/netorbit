@@ -69,8 +69,27 @@
           "group_by_type": "On networks where nothing reports which access point a device uses, the card groups devices into TVs, computers, smart home and so on.",
           "check_internet": "Each ping round also pings two public DNS servers (1.1.1.1 and 8.8.8.8). The Internet node turns red when neither answers for two rounds while your router still does, and fires netorbit_internet_down and netorbit_internet_up events.",
           "snmp_enabled": "NetOrbit asks each device once an hour whether it is a managed switch, using read-only SNMP, then reads the switch's MAC table to place devices automatically.",
-          "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here.",
+          "snmp_community": "Leave empty to try the factory default. If you changed your switches' read-only community, enter it here. Switches that only speak SNMPv3 go under SNMPv3 below.",
           "prefer_dns_names": "Show the name your network gives a device (reverse DNS, or the name it announces over Bonjour) before names from other integrations, and use it for hubs NetOrbit named itself, such as the router. Names you typed are always kept."
+        },
+        "sections": {
+          "snmp_v3": {
+            "name": "SNMPv3",
+            "description": "For switches set up with an SNMPv3 user instead of a community. Leave the user name empty to keep SNMPv3 off. With both set, NetOrbit tries the SNMPv3 user first, then the community.",
+            "data": {
+              "snmp_v3_user": "User name",
+              "snmp_v3_auth_protocol": "Authentication protocol",
+              "snmp_v3_auth_key": "Authentication passphrase",
+              "snmp_v3_priv_protocol": "Privacy (encryption) protocol",
+              "snmp_v3_priv_key": "Privacy passphrase"
+            },
+            "data_description": {
+              "snmp_v3_user": "A read-only user on your switches. Like a community, it is only sent to hubs, suggested hubs and network gear.",
+              "snmp_v3_auth_key": "At least 8 characters. Some switches use the same passphrase for authentication and privacy; then enter it in both boxes.",
+              "snmp_v3_priv_protocol": "Pick what the switch's user is set to. Encryption needs an authentication protocol as well.",
+              "snmp_v3_priv_key": "At least 8 characters."
+            }
+          }
         }
       },
       "add_hub": {
@@ -186,7 +205,9 @@
       "no_addresses": "No MAC or IP addresses were found in that text.",
       "no_matches": "None of those addresses match a device on this network.",
       "not_loaded": "NetOrbit is not running right now. Try again in a minute.",
-      "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields."
+      "bad_fields": "Write each extra field on its own line as Label: value. A field may hold up to 500 characters, and a hub or device up to 20 fields.",
+      "snmp_v3_key_short": "SNMPv3 passphrases need at least 8 characters.",
+      "snmp_v3_priv_needs_auth": "SNMPv3 encryption needs an authentication protocol too."
     },
     "abort": {
       "no_devices": "No devices are being tracked yet.",
@@ -208,6 +229,27 @@
         "access_point": "Access point",
         "mesh_node": "Mesh node",
         "other": "Other"
+      }
+    },
+    "snmp_v3_auth_protocol": {
+      "options": {
+        "none": "None",
+        "md5": "MD5",
+        "sha": "SHA-1",
+        "sha224": "SHA-224",
+        "sha256": "SHA-256",
+        "sha384": "SHA-384",
+        "sha512": "SHA-512"
+      }
+    },
+    "snmp_v3_priv_protocol": {
+      "options": {
+        "none": "None",
+        "des": "DES",
+        "3des": "3DES",
+        "aes": "AES-128",
+        "aes192": "AES-192",
+        "aes256": "AES-256"
       }
     }
   },

@@ -176,7 +176,7 @@ Under the integration's **Configure** menu:
 | Add / edit a hub | Add gear NetOrbit can't see, rename hubs, change what they connect to, *Managed by* and extra fields. |
 | Track / edit a device | Name, icon, hub (or *Automatic*), "allowed to sleep", *Managed by*, extra fields, stop tracking. |
 | Review new devices | In manual mode, choose which newly found devices to track. |
-| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off and SNMP community. |
+| Settings | Tracking mode, ping and scan intervals, the "not seen" window, randomized MACs, automatic hubs, grouping by type, the internet check, DNS names first, SNMP on/off, SNMP community and an SNMPv3 user. |
 
 **Tracking mode:** *Automatic* tracks everything it finds. *Manual* only tracks devices you add, and lists the rest under "New devices".
 
@@ -214,6 +214,7 @@ SNMP is how managed switches share their MAC address tables. NetOrbit only ever 
 
 - If your switches still use the factory read-only community, there's nothing to do.
 - If you changed it (good idea), enter it under **Settings > SNMP community**. Letters and numbers only work best; some switches silently ignore communities with symbols.
+- Switches set up with an SNMPv3 user: enter the user and its passphrases under **Settings > SNMPv3**. Like your community, the user only goes to hubs, suggested hubs and network gear. NetOrbit tries the SNMPv3 user first, then the community.
 - Where to turn SNMP on for UniFi, Omada and other switches, and which switches don't have it: [docs/SETUP.md](docs/SETUP.md#2-turn-on-snmp-on-managed-switches).
 - Grandstream GWN access points: turn SNMP on in the access point and NetOrbit reads its Wi-Fi client list. See [docs/SETUP.md](docs/SETUP.md#grandstream-gwn-access-points).
 - Consumer routers and mesh systems don't support SNMP. That's normal.

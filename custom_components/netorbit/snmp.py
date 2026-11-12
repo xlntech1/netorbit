@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 import re
 from typing import Any
@@ -28,6 +28,50 @@ PROBE_TIMEOUT = 1.0
 WALK_TIMEOUT = 2.0
 WALK_DEADLINE = 15.0  # a whole client table walk; WALK_TIMEOUT only bounds one request
 MAX_TABLE = 4096
+
+
+# SNMPv3 protocol choices in the settings, and the pysnmp names they stand for.
+V3_AUTH_PROTOCOLS = {
+    "none": "usmNoAuthProtocol",
+    "md5": "usmHMACMD5AuthProtocol",
+    "sha": "usmHMACSHAAuthProtocol",
+    "sha224": "usmHMAC128SHA224AuthProtocol",
+    "sha256": "usmHMAC192SHA256AuthProtocol",
+    "sha384": "usmHMAC256SHA384AuthProtocol",
+    "sha512": "usmHMAC384SHA512AuthProtocol",
+}
+V3_PRIV_PROTOCOLS = {
+    "none": "usmNoPrivProtocol",
+    "des": "usmDESPrivProtocol",
+    "3des": "usm3DESEDEPrivProtocol",
+    "aes": "usmAesCfb128Protocol",
+    "aes192": "usmAesCfb192Protocol",
+    "aes256": "usmAesCfb256Protocol",
+}
+
+
+@dataclass(frozen=True)
+class SnmpV3User:
+    """An SNMPv3 user. The passphrases stay out of repr(), so they never reach a log."""
+
+    user: str
+    auth_protocol: str = "sha"
+    auth_key: str = field(default="", repr=False)
+    priv_protocol: str = "aes"
+    priv_key: str = field(default="", repr=False)
+
+    @property
+    def level(self) -> str:
+        """noAuthNoPriv, authNoPriv or authPriv, from the protocols that have a passphrase."""
+        auth = self.auth_protocol in V3_AUTH_PROTOCOLS and self.auth_protocol != "none" and bool(self.auth_key)
+        if not auth:
+            return "noAuthNoPriv"
+        priv = self.priv_protocol in V3_PRIV_PROTOCOLS and self.priv_protocol != "none" and bool(self.priv_key)
+        return "authPriv" if priv else "authNoPriv"
+
+
+# What NetOrbit asks with: a v2c community, or an SNMPv3 user.
+SnmpAuth = str | SnmpV3User
 
 
 @dataclass
@@ -116,15 +160,31 @@ class SnmpClient:
     async def _target(self, host: str, timeout: float):
         return await self._mod.UdpTransportTarget.create((host, 161), timeout=timeout, retries=0)
 
-    async def probe(self, host: str, community: str) -> ProbeResult | None:
-        """Ask a host what it is. None when it does not answer with this community."""
+    def _auth(self, auth: SnmpAuth):
+        """pysnmp's form of a v2c community or an SNMPv3 user."""
+        m = self._mod
+        if not isinstance(auth, SnmpV3User):
+            return m.CommunityData(auth, mpModel=1)
+        level = auth.level
+        if level == "noAuthNoPriv":
+            return m.UsmUserData(auth.user)
+        auth_proto = getattr(m, V3_AUTH_PROTOCOLS[auth.auth_protocol])
+        if level == "authNoPriv":
+            return m.UsmUserData(auth.user, auth.auth_key, authProtocol=auth_proto)
+        return m.UsmUserData(
+            auth.user, auth.auth_key, auth.priv_key,
+            authProtocol=auth_proto, privProtocol=getattr(m, V3_PRIV_PROTOCOLS[auth.priv_protocol]),
+        )
+
+    async def probe(self, host: str, auth: SnmpAuth) -> ProbeResult | None:
+        """Ask a host what it is. None when it does not answer to this community or user."""
         if not await self._ensure():
             return None
         m = self._mod
         try:
             target = await self._target(host, PROBE_TIMEOUT)
             err_ind, err_stat, _idx, binds = await m.get_cmd(
-                self._engine, m.CommunityData(community, mpModel=1), target, m.ContextData(),
+                self._engine, self._auth(auth), target, m.ContextData(),
                 m.ObjectType(m.ObjectIdentity(OID_SYS_DESCR)),
                 m.ObjectType(m.ObjectIdentity(OID_SYS_NAME)),
                 m.ObjectType(m.ObjectIdentity(OID_BRIDGE_PORTS)),
@@ -145,16 +205,16 @@ class SnmpClient:
             object_id=object_id or None,
         )
 
-    async def mac_table(self, host: str, community: str) -> dict[str, int] | None:
+    async def mac_table(self, host: str, auth: SnmpAuth) -> dict[str, int] | None:
         """{mac: port} from the switch's forwarding table, or None when unreadable."""
         if not await self._ensure():
             return None
-        table = await self._walk_fdb(host, community, OID_Q_FDB_PORT, vlan=True)
+        table = await self._walk_fdb(host, auth, OID_Q_FDB_PORT, vlan=True)
         if not table:
-            table = await self._walk_fdb(host, community, OID_FDB_PORT, vlan=False)
+            table = await self._walk_fdb(host, auth, OID_FDB_PORT, vlan=False)
         return table
 
-    async def wireless_clients(self, host: str, community: str) -> set[str] | None:
+    async def wireless_clients(self, host: str, auth: SnmpAuth) -> set[str] | None:
         """MACs of the Wi-Fi clients a Grandstream GWN access point lists, or None when unreadable.
 
         An empty set means the AP answered but has no clients right now. The table is indexed by
@@ -167,24 +227,24 @@ class SnmpClient:
             # WALK_TIMEOUT only bounds one request, so a slow AP answering a row at a time could
             # hold the whole scan; the deadline covers the walk as a whole.
             async with asyncio.timeout(WALK_DEADLINE):
-                found = await self._walk_gwn(host, community, OID_GWN_CLIENT_MAC)
+                found = await self._walk_gwn(host, auth, OID_GWN_CLIENT_MAC)
                 if found is None:
                     return None
                 if not found:
-                    found = await self._walk_gwn(host, community, OID_GWN_CLIENT_IP)
+                    found = await self._walk_gwn(host, auth, OID_GWN_CLIENT_IP)
                 return found
         except TimeoutError:
             _LOGGER.debug("SNMP client walk of %s took longer than %ss", host, WALK_DEADLINE)
             return None
 
-    async def _walk_gwn(self, host: str, community: str, base: str) -> set[str] | None:
+    async def _walk_gwn(self, host: str, auth: SnmpAuth, base: str) -> set[str] | None:
         m = self._mod
         base_t = tuple(int(x) for x in base.split("."))
         out: set[str] = set()
         try:
             target = await self._target(host, WALK_TIMEOUT)
             async for err_ind, err_stat, _idx, binds in m.bulk_walk_cmd(
-                self._engine, m.CommunityData(community, mpModel=1), target, m.ContextData(),
+                self._engine, self._auth(auth), target, m.ContextData(),
                 0, 40, m.ObjectType(m.ObjectIdentity(base)), lexicographicMode=False,
             ):
                 if err_ind or err_stat:
@@ -207,14 +267,14 @@ class SnmpClient:
             return out or None
         return out
 
-    async def _walk_fdb(self, host: str, community: str, base: str, vlan: bool) -> dict[str, int] | None:
+    async def _walk_fdb(self, host: str, auth: SnmpAuth, base: str, vlan: bool) -> dict[str, int] | None:
         m = self._mod
         base_t = tuple(int(x) for x in base.split("."))
         out: dict[str, int] = {}
         try:
             target = await self._target(host, WALK_TIMEOUT)
             async for err_ind, err_stat, _idx, binds in m.bulk_walk_cmd(
-                self._engine, m.CommunityData(community, mpModel=1), target, m.ContextData(),
+                self._engine, self._auth(auth), target, m.ContextData(),
                 0, 40, m.ObjectType(m.ObjectIdentity(base)), lexicographicMode=False,
             ):
                 if err_ind or err_stat:

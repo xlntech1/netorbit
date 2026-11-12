@@ -36,6 +36,11 @@ from .const import (
     CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
+    CONF_SNMP_V3_AUTH_KEY,
+    CONF_SNMP_V3_AUTH_PROTOCOL,
+    CONF_SNMP_V3_PRIV_KEY,
+    CONF_SNMP_V3_PRIV_PROTOCOL,
+    CONF_SNMP_V3_USER,
     CONF_STALE_HOURS,
     CONF_SUBNET,
     DEFAULT_AUTO_HUBS,
@@ -45,6 +50,8 @@ from .const import (
     DEFAULT_PING_INTERVAL,
     DEFAULT_PREFER_DNS,
     DEFAULT_SNMP_ENABLED,
+    DEFAULT_SNMP_V3_AUTH_PROTOCOL,
+    DEFAULT_SNMP_V3_PRIV_PROTOCOL,
     DEFAULT_STALE_HOURS,
     DOMAIN,
     EVENT_DEVICE_RECOVERED,
@@ -87,7 +94,7 @@ from .logic import (
     short_hostname,
     subnet_hosts,
 )
-from .snmp import SnmpClient, is_grandstream
+from .snmp import SnmpAuth, SnmpClient, SnmpV3User, is_grandstream
 from .mdns import mdns_label, mdns_name
 from .sources import client_access_points, ping_names_by_ip, registry_by_mac, ssdp_types_by_ip, tracker_names_by_mac
 from .topology import Topology, infer, macs_close
@@ -151,6 +158,20 @@ class NetOrbitData:
     last_scan: str | None = None
 
 
+def snmp_v3_user(opts: dict[str, Any]) -> SnmpV3User | None:
+    """The SNMPv3 user from the settings, or None when no user name is set."""
+    user = (opts.get(CONF_SNMP_V3_USER) or "").strip()
+    if not user:
+        return None
+    return SnmpV3User(
+        user,
+        opts.get(CONF_SNMP_V3_AUTH_PROTOCOL) or DEFAULT_SNMP_V3_AUTH_PROTOCOL,
+        opts.get(CONF_SNMP_V3_AUTH_KEY) or "",
+        opts.get(CONF_SNMP_V3_PRIV_PROTOCOL) or DEFAULT_SNMP_V3_PRIV_PROTOCOL,
+        opts.get(CONF_SNMP_V3_PRIV_KEY) or "",
+    )
+
+
 def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     """Merge options over defaults so older entries keep working."""
     opts = dict(entry.options)
@@ -162,6 +183,11 @@ def options_with_defaults(entry: ConfigEntry) -> dict[str, Any]:
     opts.setdefault(CONF_AUTO_HUBS, DEFAULT_AUTO_HUBS)
     opts.setdefault(CONF_SNMP_ENABLED, DEFAULT_SNMP_ENABLED)
     opts.setdefault(CONF_SNMP_COMMUNITY, "")
+    opts.setdefault(CONF_SNMP_V3_USER, "")
+    opts.setdefault(CONF_SNMP_V3_AUTH_PROTOCOL, DEFAULT_SNMP_V3_AUTH_PROTOCOL)
+    opts.setdefault(CONF_SNMP_V3_AUTH_KEY, "")
+    opts.setdefault(CONF_SNMP_V3_PRIV_PROTOCOL, DEFAULT_SNMP_V3_PRIV_PROTOCOL)
+    opts.setdefault(CONF_SNMP_V3_PRIV_KEY, "")
     opts.setdefault(CONF_GROUP_BY_TYPE, True)
     opts.setdefault(CONF_CHECK_INTERNET, True)
     opts.setdefault(CONF_PREFER_DNS, DEFAULT_PREFER_DNS)
@@ -253,10 +279,10 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
     @callback
     def apply_options(self, entry: ConfigEntry) -> None:
         """Use new options without reloading the entry."""
-        old_comm = self.opts.get(CONF_SNMP_COMMUNITY)
+        old_auth = self._custom_auth()
         self.opts = options_with_defaults(entry)
         self.update_interval = timedelta(seconds=self.opts[CONF_PING_INTERVAL])
-        if self.opts.get(CONF_SNMP_COMMUNITY) != old_comm:
+        if self._custom_auth() != old_auth:
             self._force_probe = True
             self._force_sweep = True
 
@@ -439,8 +465,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 self.set_scan(phase="snmp")
                 await self._snmp_probe(now, replied | set(arp))
             await self._detect_hubs()
-            if self.opts[CONF_SNMP_ENABLED] and self.opts.get(CONF_SNMP_COMMUNITY):
-                # Gear that detection just suggested may only answer to the custom community.
+            if self.opts[CONF_SNMP_ENABLED] and self._custom_auth():
+                # Gear that detection just suggested may only answer to your own community or user.
                 # Ask it now, then look again, so it doesn't wait for the next sweep.
                 before = set(self._community_asked)
                 await self._snmp_probe(now, replied | set(arp))
@@ -631,15 +657,26 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
     # ----- SNMP ----------------------------------------------------------------
 
-    def _communities(self) -> list[str]:
+    def _custom_auth(self) -> list[tuple[str, SnmpAuth]]:
+        """Your own SNMP credentials, in the order they are tried: the SNMPv3 user, then the community.
+
+        Each comes with the name a probe records ("v3", "custom"), so tables are read with
+        whichever one the hub answered to."""
+        out: list[tuple[str, SnmpAuth]] = []
+        v3 = snmp_v3_user(self.opts)
+        if v3:
+            out.append(("v3", v3))
         custom = (self.opts.get(CONF_SNMP_COMMUNITY) or "").strip()
-        out = [custom] if custom else []
-        if SNMP_DEFAULT_COMMUNITY not in out:
-            out.append(SNMP_DEFAULT_COMMUNITY)
+        if custom and custom != SNMP_DEFAULT_COMMUNITY:
+            out.append(("custom", custom))
         return out
 
+    def _auth_for(self, info: dict[str, Any]) -> SnmpAuth:
+        """What to read a hub with: what it last answered to, or the factory default once that is gone."""
+        return dict(self._custom_auth()).get(info.get("community") or "", SNMP_DEFAULT_COMMUNITY)
+
     def _community_hosts(self, hub_ips: set[str]) -> set[str]:
-        """IPs allowed to receive a custom SNMP community: hubs, suggested hubs, and network-gear makers."""
+        """IPs allowed to receive your own SNMP community or user: hubs, suggested hubs, and network-gear makers."""
         out = {ip for ip in hub_ips if ip}
         out |= {s.get("ip") for s in self._suggestions if s.get("ip")}
         for rec in self._seen.values():
@@ -660,7 +697,7 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
         trusted = self._community_hosts(set(hub_hosts))
         # Devices that just became hubs or suggestions are asked with the custom community on the
         # next sweep instead of waiting an hour.
-        fresh = (trusted - self._community_asked) & (live_ips | set(hub_hosts)) if self.opts.get(CONF_SNMP_COMMUNITY) else set()
+        fresh = (trusted - self._community_asked) & (live_ips | set(hub_hosts)) if self._custom_auth() else set()
         if probe_due or fresh:
             targets = sorted(live_ips | set(hub_hosts)) if probe_due else sorted(fresh)
             if probe_due:
@@ -670,15 +707,16 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
 
             async def probe(ip: str) -> None:
                 async with sem:
-                    # SNMP v2c sends the community in clear text. Your own community only goes to
-                    # hubs and likely network gear; everything else is only asked with the factory default.
-                    comms = self._communities() if ip in trusted else [SNMP_DEFAULT_COMMUNITY]
-                    for i, comm in enumerate(comms):
-                        res = await self._snmp.probe(ip, comm)
+                    # SNMP v2c sends the community in clear text, and an SNMPv3 request names its user in
+                    # clear. Your own community and user only go to hubs and likely network gear;
+                    # everything else is only asked with the factory default.
+                    tries = [*self._custom_auth(), ("default", SNMP_DEFAULT_COMMUNITY)] if ip in trusted else [("default", SNMP_DEFAULT_COMMUNITY)]
+                    for kind, auth in tries:
+                        res = await self._snmp.probe(ip, auth)
                         if res:
                             for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                                 rec = self._seen.setdefault(key, {"first_seen": now.isoformat()})
-                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "object_id": res.object_id, "community": "custom" if (comm != SNMP_DEFAULT_COMMUNITY) else "default"}
+                                rec["snmp"] = {"descr": res.descr, "name": res.name, "bridge": res.bridge, "object_id": res.object_id, "community": kind}
                             return
                     for key in {by_ip.get(ip), hub_hosts.get(ip)} - {None}:
                         self._seen.get(key, {}).pop("snmp", None)
@@ -694,24 +732,22 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             info = self._snmp_info(hub)
             if not host or not info or not info.get("bridge"):
                 continue
-            comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
-            table = await self._snmp.mac_table(host, comm)
+            table = await self._snmp.mac_table(host, self._auth_for(info))
             if table:
                 tables[hub["id"]] = table
         return tables
 
     async def _read_ap_clients(self) -> dict[str, str]:
         """Read the Wi-Fi client list from every Grandstream access point hub: {client mac: hub id}."""
-        asked: list[tuple[str, str, str]] = []
+        asked: list[tuple[str, str, SnmpAuth]] = []
         for hub in self.opts[CONF_HUBS]:
             host = hub.get("host")
             info = self._snmp_info(hub)
             if not host or not info or info.get("bridge") or not is_grandstream(info.get("object_id"), info.get("descr")):
                 continue
-            comm = self._communities()[0] if info.get("community") == "custom" else SNMP_DEFAULT_COMMUNITY
-            asked.append((hub["id"], host, comm))
+            asked.append((hub["id"], host, self._auth_for(info)))
         # Ask all the access points at once so a slow one does not hold up the others.
-        results = await asyncio.gather(*(self._snmp.wireless_clients(host, comm) for _id, host, comm in asked), return_exceptions=True)
+        results = await asyncio.gather(*(self._snmp.wireless_clients(host, auth) for _id, host, auth in asked), return_exceptions=True)
         out: dict[str, str] = {}
         for (hub_id, _host, _comm), clients in zip(asked, results):
             for mac in (clients if isinstance(clients, set) else ()):

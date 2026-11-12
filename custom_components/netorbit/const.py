@@ -24,6 +24,12 @@ CONF_AUTO_HUBS: Final = "auto_hubs"
 CONF_DISMISSED_HUBS: Final = "dismissed_hubs"
 CONF_SNMP_ENABLED: Final = "snmp_enabled"
 CONF_SNMP_COMMUNITY: Final = "snmp_community"
+CONF_SNMP_V3: Final = "snmp_v3"  # the SNMPv3 section of the Settings form; its values are stored flat
+CONF_SNMP_V3_USER: Final = "snmp_v3_user"
+CONF_SNMP_V3_AUTH_PROTOCOL: Final = "snmp_v3_auth_protocol"
+CONF_SNMP_V3_AUTH_KEY: Final = "snmp_v3_auth_key"
+CONF_SNMP_V3_PRIV_PROTOCOL: Final = "snmp_v3_priv_protocol"
+CONF_SNMP_V3_PRIV_KEY: Final = "snmp_v3_priv_key"
 CONF_GROUP_BY_TYPE: Final = "group_by_type"
 CONF_CHECK_INTERNET: Final = "check_internet"
 CONF_PREFER_DNS: Final = "prefer_dns_names"
@@ -41,6 +47,9 @@ DEFAULT_AUTO_HUBS: Final = True
 DEFAULT_SNMP_ENABLED: Final = True
 DEFAULT_PREFER_DNS: Final = False
 SNMP_DEFAULT_COMMUNITY: Final = "public"
+DEFAULT_SNMP_V3_AUTH_PROTOCOL: Final = "sha"
+DEFAULT_SNMP_V3_PRIV_PROTOCOL: Final = "aes"
+SNMP_V3_MIN_KEY: Final = 8  # RFC 3414: passphrases are at least 8 characters
 
 # Free text people attach to a hub or device ("Managed by", extra fields)
 MAX_FIELDS: Final = 20

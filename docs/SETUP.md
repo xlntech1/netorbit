@@ -53,15 +53,17 @@ Grandstream GWN access points list their own Wi-Fi clients over SNMP, so NetOrbi
 
 ### Any other managed switch
 
-Open the switch's web page and look for **SNMP** (often under Management, System or Monitoring). Turn on **SNMP v2c**, and set or keep a **read-only** community. You don't need traps, write access or SNMPv3.
+Open the switch's web page and look for **SNMP** (often under Management, System or Monitoring). Turn on **SNMP v2c**, and set or keep a **read-only** community. You don't need traps or write access. A switch that only speaks **SNMPv3** works too: give it a read-only user (see below).
 
 ### Then tell NetOrbit
 
 Settings > Devices & services > NetOrbit > **Configure > Settings**, and enter the community under **SNMP community**. If you left it as the factory "public", there's nothing to enter.
 
+**SNMPv3.** If your switch uses an SNMPv3 user instead of a community, open **SNMPv3** at the bottom of the same form and enter the user name, the authentication protocol and passphrase, and the privacy (encryption) protocol and passphrase, exactly as the switch has them. Passphrases need at least 8 characters, and encryption needs authentication as well. Leave the user name empty to keep SNMPv3 off. You can set a community and an SNMPv3 user together: NetOrbit tries the user first, then the community, so switches of both kinds on one network work.
+
 NetOrbit asks devices once an hour whether they speak SNMP, and reads switch tables every few minutes. It's a tiny amount of traffic.
 
-**Who gets your community.** SNMP v2c sends the community unencrypted, so NetOrbit only sends yours to hubs, suggested hubs, and gear from makers that only build network equipment (UniFi, eero, Aruba, MikroTik and so on). Everything else is only asked with the factory "public". If your switch is from a maker that also sells plugs and cameras (TP-Link, Netgear) and NetOrbit doesn't spot it, add it as a hub under **Configure > Add a hub** with its IP, and NetOrbit will start reading it.
+**Who gets your community.** SNMP v2c sends the community unencrypted, so NetOrbit only sends yours to hubs, suggested hubs, and gear from makers that only build network equipment (UniFi, eero, Aruba, MikroTik and so on). Everything else is only asked with the factory "public". If your switch is from a maker that also sells plugs and cameras (TP-Link, Netgear) and NetOrbit doesn't spot it, add it as a hub under **Configure > Add a hub** with its IP, and NetOrbit will start reading it. Your SNMPv3 user goes to the same devices only: SNMPv3 encrypts the passphrases, but every request still names the user in the clear.
 
 **Tips**
 

@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector as sel
 
 from .const import (
@@ -26,12 +27,20 @@ from .const import (
     CONF_PREFER_DNS,
     CONF_SNMP_COMMUNITY,
     CONF_SNMP_ENABLED,
+    CONF_SNMP_V3,
+    CONF_SNMP_V3_AUTH_KEY,
+    CONF_SNMP_V3_AUTH_PROTOCOL,
+    CONF_SNMP_V3_PRIV_KEY,
+    CONF_SNMP_V3_PRIV_PROTOCOL,
+    CONF_SNMP_V3_USER,
     CONF_STALE_HOURS,
     CONF_SUBNET,
     DEFAULT_DISCOVERY_INTERVAL,
     DEFAULT_IGNORE_RANDOM_MAC,
     DEFAULT_MODE,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_SNMP_V3_AUTH_PROTOCOL,
+    DEFAULT_SNMP_V3_PRIV_PROTOCOL,
     DEFAULT_STALE_HOURS,
     DOMAIN,
     HUB_ROUTER,
@@ -40,10 +49,12 @@ from .const import (
     MIN_PING_INTERVAL,
     MODES,
     ROOT_HUB_ID,
+    SNMP_V3_MIN_KEY,
 )
 from . import manage
 from .coordinator import options_with_defaults
 from .logic import extract_addresses, normalize_mac, validate_subnet
+from .snmp import V3_AUTH_PROTOCOLS, V3_PRIV_PROTOCOLS
 
 # Shown in the "setup finished" dialog (translations can't contain URLs, so it's a placeholder).
 GUIDE_URL = "https://github.com/the-scott-davis/netorbit#add-the-map-to-a-dashboard"
@@ -80,6 +91,36 @@ def _select(options: list[str] | list[dict[str, str]], key: str | None = None, m
     if key:
         config["translation_key"] = key
     return sel.SelectSelector(config)
+
+
+def _password_box(value: str | None) -> tuple[dict[str, Any], sel.TextSelector]:
+    """A masked text box that shows what is saved (the browser keeps it hidden)."""
+    return {"suggested_value": value or None}, sel.TextSelector(sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD))
+
+
+def _v3_values(v3: dict[str, Any]) -> dict[str, Any]:
+    """The SNMPv3 section of the Settings form, as the flat options it is stored in."""
+    return {
+        CONF_SNMP_V3_USER: (v3.get(CONF_SNMP_V3_USER) or "").strip(),
+        CONF_SNMP_V3_AUTH_PROTOCOL: v3.get(CONF_SNMP_V3_AUTH_PROTOCOL) or DEFAULT_SNMP_V3_AUTH_PROTOCOL,
+        CONF_SNMP_V3_AUTH_KEY: v3.get(CONF_SNMP_V3_AUTH_KEY) or "",
+        CONF_SNMP_V3_PRIV_PROTOCOL: v3.get(CONF_SNMP_V3_PRIV_PROTOCOL) or DEFAULT_SNMP_V3_PRIV_PROTOCOL,
+        CONF_SNMP_V3_PRIV_KEY: v3.get(CONF_SNMP_V3_PRIV_KEY) or "",
+    }
+
+
+def _v3_error(v: dict[str, Any]) -> str | None:
+    """Why these SNMPv3 settings can't work, or None. With no user name, SNMPv3 is off and nothing is checked."""
+    if not v[CONF_SNMP_V3_USER]:
+        return None
+    auth, priv = v[CONF_SNMP_V3_AUTH_PROTOCOL], v[CONF_SNMP_V3_PRIV_PROTOCOL]
+    if priv != "none" and auth == "none":
+        return "snmp_v3_priv_needs_auth"
+    if auth != "none" and len(v[CONF_SNMP_V3_AUTH_KEY]) < SNMP_V3_MIN_KEY:
+        return "snmp_v3_key_short"
+    if priv != "none" and len(v[CONF_SNMP_V3_PRIV_KEY]) < SNMP_V3_MIN_KEY:
+        return "snmp_v3_key_short"
+    return None
 
 
 class NetOrbitConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -202,7 +243,16 @@ class NetOrbitOptionsFlow(OptionsFlow):
         return self.async_show_menu(step_id="init", menu_options=menu)
 
     async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        o = self.opts
         if user_input is not None:
+            v3 = _v3_values(user_input.get(CONF_SNMP_V3) or {})
+            error = _v3_error(v3)
+            if error:
+                errors["base"] = error
+                # Show the form again with what was typed, not what was saved.
+                o = {**self.opts, **{k: v for k, v in user_input.items() if k != CONF_SNMP_V3}, **v3}
+        if user_input is not None and not errors:
             self.opts.update(
                 {
                     CONF_MODE: user_input[CONF_MODE],
@@ -216,10 +266,26 @@ class NetOrbitOptionsFlow(OptionsFlow):
                     CONF_SNMP_ENABLED: user_input[CONF_SNMP_ENABLED],
                     CONF_SNMP_COMMUNITY: (user_input.get(CONF_SNMP_COMMUNITY) or "").strip(),
                     CONF_PREFER_DNS: user_input[CONF_PREFER_DNS],
+                    **v3,
                 }
             )
             return self._save()
-        o = self.opts
+        community_desc, community_box = _password_box(o.get(CONF_SNMP_COMMUNITY))
+        auth_desc, auth_box = _password_box(o.get(CONF_SNMP_V3_AUTH_KEY))
+        priv_desc, priv_box = _password_box(o.get(CONF_SNMP_V3_PRIV_KEY))
+        v3_schema = vol.Schema(
+            {
+                vol.Optional(CONF_SNMP_V3_USER, description={"suggested_value": o.get(CONF_SNMP_V3_USER) or None}): str,
+                vol.Required(
+                    CONF_SNMP_V3_AUTH_PROTOCOL, default=o.get(CONF_SNMP_V3_AUTH_PROTOCOL) or DEFAULT_SNMP_V3_AUTH_PROTOCOL
+                ): _select(list(V3_AUTH_PROTOCOLS), "snmp_v3_auth_protocol"),
+                vol.Optional(CONF_SNMP_V3_AUTH_KEY, description=auth_desc): auth_box,
+                vol.Required(
+                    CONF_SNMP_V3_PRIV_PROTOCOL, default=o.get(CONF_SNMP_V3_PRIV_PROTOCOL) or DEFAULT_SNMP_V3_PRIV_PROTOCOL
+                ): _select(list(V3_PRIV_PROTOCOLS), "snmp_v3_priv_protocol"),
+                vol.Optional(CONF_SNMP_V3_PRIV_KEY, description=priv_desc): priv_box,
+            }
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_MODE, default=o[CONF_MODE]): _select(MODES, "mode"),
@@ -232,12 +298,12 @@ class NetOrbitOptionsFlow(OptionsFlow):
                 vol.Required(CONF_CHECK_INTERNET, default=o[CONF_CHECK_INTERNET]): bool,
                 vol.Required(CONF_PREFER_DNS, default=o[CONF_PREFER_DNS]): bool,
                 vol.Required(CONF_SNMP_ENABLED, default=o[CONF_SNMP_ENABLED]): bool,
-                vol.Optional(CONF_SNMP_COMMUNITY, description={"suggested_value": o.get(CONF_SNMP_COMMUNITY) or None}): sel.TextSelector(
-                    sel.TextSelectorConfig(type=sel.TextSelectorType.PASSWORD)
-                ),
+                vol.Optional(CONF_SNMP_COMMUNITY, description=community_desc): community_box,
+                # Folded away until an SNMPv3 user is set; a form sent without it keeps SNMPv3 off.
+                vol.Required(CONF_SNMP_V3, default={}): section(v3_schema, {"collapsed": not o.get(CONF_SNMP_V3_USER)}),
             }
         )
-        return self.async_show_form(step_id="settings", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema, errors=errors)
 
     # ----- hubs ------------------------------------------------------------------
 

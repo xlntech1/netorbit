@@ -7,7 +7,22 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import NetOrbitConfigEntry
-from .const import CONF_DEVICES, CONF_DISMISSED_HUBS, CONF_HUBS, CONF_IGNORED, CONF_SNMP_COMMUNITY
+from .const import (
+    CONF_DEVICES,
+    CONF_DISMISSED_HUBS,
+    CONF_HUBS,
+    CONF_IGNORED,
+    CONF_SNMP_COMMUNITY,
+    CONF_SNMP_V3_AUTH_KEY,
+    CONF_SNMP_V3_PRIV_KEY,
+    CONF_SNMP_V3_USER,
+)
+
+# Left out of the settings: lists that hold addresses and names, and every credential.
+_NOT_SHOWN = (
+    CONF_HUBS, CONF_DEVICES, CONF_IGNORED, CONF_DISMISSED_HUBS,
+    CONF_SNMP_COMMUNITY, CONF_SNMP_V3_USER, CONF_SNMP_V3_AUTH_KEY, CONF_SNMP_V3_PRIV_KEY,
+)
 
 
 def _mask(i: int, prefix: str) -> str:
@@ -43,8 +58,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: NetOrbi
             )
     return {
         "settings": {
-            **{k: v for k, v in opts.items() if k not in (CONF_HUBS, CONF_DEVICES, CONF_IGNORED, CONF_DISMISSED_HUBS, CONF_SNMP_COMMUNITY)},
+            **{k: v for k, v in opts.items() if k not in _NOT_SHOWN},
             "snmp_community_set": bool(opts.get(CONF_SNMP_COMMUNITY)),
+            "snmp_v3_user_set": bool(opts.get(CONF_SNMP_V3_USER)),
             "dismissed_hubs": len(opts.get(CONF_DISMISSED_HUBS, [])),
         },
         "automatic_sources": data.sources if data else [],
