@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Edit in the details popup saves once: the text and a new name go in one settings write instead of two. A refused value keeps the form open with the reason and what was typed (#60).
+
 ## 0.4.0b1
 
 ### Added
