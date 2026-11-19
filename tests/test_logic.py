@@ -12,6 +12,7 @@ from custom_components.netorbit.logic import (
     keys_answering,
     normalize_mac,
     parse_proc_arp,
+    parse_proc_arp_all,
     rollup_status,
     short_hostname,
     slugify_id,
@@ -102,6 +103,20 @@ def test_parse_arp():
     assert parse_proc_arp(text) == {"192.0.2.10": "00:00:5e:00:53:0b", "192.0.2.12": "00:00:5e:00:53:0c"}
 
 
+def test_parse_arp_lists_every_mac_for_an_address():
+    text = (
+        "IP address       HW type     Flags       HW address            Mask     Device\n"
+        "192.0.2.10       0x1         0x2         00:00:5e:00:53:0b     *        eth0\n"
+        "192.0.2.10       0x1         0x2         00:00:5e:00:53:0c     *        br0\n"
+        "192.0.2.11       0x1         0x2         00:00:5e:00:53:0d     *        eth0\n"
+    )
+    assert parse_proc_arp_all(text) == {
+        "192.0.2.10": ["00:00:5e:00:53:0b", "00:00:5e:00:53:0c"],
+        "192.0.2.11": ["00:00:5e:00:53:0d"],
+    }
+    assert parse_proc_arp(text) == {"192.0.2.10": "00:00:5e:00:53:0c", "192.0.2.11": "00:00:5e:00:53:0d"}
+
+
 def test_keys_answering():
     b, c = "00:00:5e:00:53:0b", "00:00:5e:00:53:0c"
     macs = {b: b, c: c, "ip:192.0.2.10": None}
@@ -141,6 +156,16 @@ def test_useful_name_skips_addresses():
     assert ping_label("ping: NAS") == "NAS"
     assert ping_label("Pinger box") == "Pinger box"
     assert ping_label("192.0.2.9") is None
+
+
+def test_tracker_label_skips_maker_plus_mac_end():
+    from custom_components.netorbit.logic import tracker_label
+
+    assert tracker_label("Hall Thermostat") == "Hall Thermostat"
+    assert tracker_label("Acme 00:53:0C") is None
+    assert tracker_label("00:53:0c") is None
+    assert tracker_label("00:00:5e:00:53:0c") is None
+    assert tracker_label("Office 12:30") == "Office 12:30"
 
 
 def test_label_helps_hub_detection():
