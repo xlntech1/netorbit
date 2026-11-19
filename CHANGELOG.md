@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A change made in Settings no longer waits for the next ping round to show on the map when the change before it saved nothing new (a service call or an *Edit* that set what was already there).
+
 ## 0.4.0b1
 
 ### Added
