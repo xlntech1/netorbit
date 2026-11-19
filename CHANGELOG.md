@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Managed by, extra fields and the DNS name stay out of Home Assistant's history.** They are still on each sensor's live state for the card, templates and automations, but long text is no longer repeated in the history database on every change and can't push a sensor past the recorder's 16 KB attribute limit (#58).
+
 ## 0.4.0b1
 
 ### Added

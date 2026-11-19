@@ -64,6 +64,9 @@ class NetOrbitNodeSensor(CoordinatorEntity[NetOrbitCoordinator], SensorEntity):
     _attr_options = STATUSES
     _attr_translation_key = "node"
     _attr_has_entity_name = True
+    # Free text can run to several KB (20 fields of 500 characters); keep it out of the history database, where it
+    # would repeat on every change and could pass the recorder's 16 KB attribute limit.
+    _unrecorded_attributes = frozenset({"managed_by", "fields", "fqdn"})
 
     def __init__(self, coordinator: NetOrbitCoordinator, key: str) -> None:
         super().__init__(coordinator)
