@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+- **The map no longer jumps down after a redraw**, such as the one closing a popup makes, when the header's icons take a moment to load. The header was laid out before its icons had a size, then wrapped onto a second line once they did, so a quick tap on the next hub could miss. Icons now hold their size from the first layout (#44).
+
+## 0.4.0b1
+
 ### Added
 - **Tap a hub or device for its details.** Outside Edit layout, a tap opens a NetOrbit popup with the DNS name, IP, MAC, maker, the hub it connects through and how it was placed, when it was first and last seen, and any text you attached to it. *More info* still opens Home Assistant's own dialog. Admins get *Edit* there to change the name, *Managed by* and the extra fields.
 - **Managed by and extra fields.** Every hub and device can carry a *Managed by* line (a link, or the name of another hub or device on the map, which the popup then jumps to) and up to 20 extra fields (`Label: value`). Set them from the details popup, the integration's *Edit* forms, the new `netorbit.update_device` service, `netorbit.update_hub`, or an AI assistant. Exports include them, and an import checks them the same way (anything that fails is left out and counted).
@@ -14,7 +19,8 @@
 - Opening a second popup over the first (for example *Edit* from a device's details) no longer freezes the map until the page is reloaded.
 - **A popup left open no longer freezes the map.** The map didn't redraw while a popup was open, so one left open (on a wall panel, say) stopped all updates until someone closed it. The details popup now updates along with the map, and every popup closes on a tap outside it, on Escape, and after two minutes without a touch; a tap on another device still opens that device's popup, and a form with unsaved changes stays open until you close it.
 - A tooltip shown on a map redrawn under the mouse now appears next to the pointer, not in the corner of the card (thanks @ninchistudios, #66).
-- **The map no longer jumps down after a redraw**, such as the one closing a popup makes, when the header's icons take a moment to load. The header was laid out before its icons had a size, then wrapped onto a second line once they did, so a quick tap on the next hub could miss. Icons now hold their size from the first layout (#44).
+- **A lookup by IP finds the device that has the address now.** When DHCP gives a departed device's address to another device, services and assistant tools given that address no longer act on the departed one, and its sensor no longer shows the address (follow-up to #47). A device keeps its address while ARP still lists its MAC there, even when ARP lists another MAC for it too (a bridge on a second interface, say). This also takes offline a device that had already left before the upgrade to 0.3.0, unless it was tracked by hand with an IP (#65).
+- **Home Assistant 2026.11: router clients no longer turn into hubs or lose their names.** From 2026.11, UniFi, Nmap and other router integrations give each client's tracker a device of its own, named after an alias, a hostname or the maker plus part of the MAC. NetOrbit no longer takes such a device for network gear (a client called "Hallway Switch" was added as a switch) or lets its name replace the one NetOrbit found; a name you give the device yourself still counts, and its maker and model are kept. A tracker that is on no longer passes on a name made of a maker and the end of a MAC either (how Nmap names a client without a hostname, "Acme 00:53:0C"). These integrations also add new client trackers turned off now, and NetOrbit reads names and access points only from trackers that are on.
 
 ## 0.3.1
 
@@ -37,7 +43,7 @@
 - **Saved videos start right away** and end without the long pause at the start and end (#29).
 
 ### Known issues
-- **Devices that left before you upgraded may show online.** If a device left before 0.3.0 and its address has since gone to another device, it can stay online, because the #47 check needs an address saved by 0.3.0. To clear it, open the device under the integration's Configure menu and choose "Stop tracking and ignore this device", or call `netorbit.ignore_device`. This happens only once: devices that leave from now on go offline as #47 describes (thanks @ninchistudios, #65).
+- **Devices that left before you upgraded may show online.** If a device left before 0.3.0 and its address has since gone to another device, it can stay online, because the #47 check needs an address saved by 0.3.0. To clear it, open the device under the integration's Configure menu and choose "Stop tracking and ignore this device", or call `netorbit.ignore_device`. This happens only once: devices that leave from now on go offline as #47 describes (thanks @ninchistudios, #65). **Fixed in the next release** (#92): a sweep takes such a device offline once its old address shows up on another device, so only a device you tracked by hand with an IP still needs ignoring.
 
 ## 0.2.10
 
