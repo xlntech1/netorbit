@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- *Managed by* links to the right node: names first, then IP or MAC, then DNS names. A name that fits two nodes stays plain text, and a node never links to itself, so a device announcing the Bonjour name "nas" no longer wins over the hub labelled NAS (#59).
+
 ## 0.4.0b1
 
 ### Added
