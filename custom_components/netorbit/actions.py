@@ -293,8 +293,12 @@ TEXT_KEYS = ("managed_by", "fields")
 
 def _import_text(target: dict[str, Any], src: dict[str, Any]) -> int:
     """Set Managed by and the extra fields of an imported hub or device on `target` through manage.set_fields, so
-    an import gets the same checks as the services and forms. A value that fails them is left out and the setting
-    already there is kept; an imported list of fields replaces the old one. Returns how many values were left out."""
+    an import gets the same checks as the services and forms. Returns how many values were left out.
+
+    Managed by: a value that fails the checks is left out and the one already there is kept.
+    Fields: an imported list replaces the old one, and an empty list (`{}`) clears it, since an export only writes
+    `fields` when there are some. Values that fail the checks are left out; when every imported value fails, the old
+    fields are kept, so a broken export never wipes them."""
     skipped = 0
     if "managed_by" in src:
         value = src["managed_by"]
@@ -307,14 +311,21 @@ def _import_text(target: dict[str, Any], src: dict[str, Any]) -> int:
     if "fields" in src:
         fields = src["fields"]
         if isinstance(fields, dict):
-            target.pop("fields", None)
+            # Build the new list on its own first: the old one goes only once something imported is usable.
+            built: dict[str, Any] = {}
+            failed = 0
             for label, value in fields.items():
                 try:
                     if not isinstance(value, str):
                         raise manage.ManageError("A field value must be text")
-                    manage.set_fields(target, fields={label: value})
+                    manage.set_fields(built, fields={label: value})
                 except manage.ManageError:
-                    skipped += 1
+                    failed += 1
+            skipped += failed
+            if not fields or failed < len(fields):
+                target.pop("fields", None)
+                if built.get("fields"):
+                    target["fields"] = built["fields"]
         elif fields is not None:
             skipped += 1
     return skipped

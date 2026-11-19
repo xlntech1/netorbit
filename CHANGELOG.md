@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- An import whose `fields` all fail the checks no longer wipes the fields already there; an empty `fields` list (`{}`) still clears them, as the comment in the code now says (#86).
+
 ## 0.4.0b1
 
 ### Added

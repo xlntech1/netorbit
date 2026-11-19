@@ -673,6 +673,35 @@ async def test_import_checks_managed_by_and_fields(hass: HomeAssistant, fake_net
     assert router["fields"] == {} and router["managed_by"] is None
 
 
+async def test_import_empty_or_all_invalid_fields(hass: HomeAssistant, fake_net) -> None:
+    """An imported `fields: {}` clears the fields on purpose; a list where every value fails the checks keeps the
+    fields already there; a list with usable values replaces the old one (#86)."""
+    fake_net.alive = {GATEWAY, "192.0.2.11"}
+    fake_net.arp = {"192.0.2.11": MAC_B}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    await hass.services.async_call(DOMAIN, "update_hub", {"hub": "gateway", "fields": {"Model": "Edge 1"}}, blocking=True)
+    await hass.services.async_call(DOMAIN, "update_device", {"device": MAC_B, "name": "Printer", "fields": {"Rack": "A2"}}, blocking=True)
+    await hass.async_block_till_done()
+    exported = await hass.services.async_call(DOMAIN, "export_config", {}, blocking=True, return_response=True)
+    assert exported["devices"][MAC_B]["fields"] == {"Rack": "A2"}
+
+    exported["hubs"][0]["fields"] = {}
+    exported["devices"][MAC_B]["fields"] = {"Long": "y" * 501, "Shelf": 2}
+    res = await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True, return_response=True)
+    await hass.async_block_till_done()
+    assert res["skipped"] == 2
+    assert "fields" not in next(h for h in entry.options["hubs"] if h["id"] == "gateway")
+    assert entry.options["devices"][MAC_B]["fields"] == {"Rack": "A2"}
+
+    # One usable value among bad ones: the imported list replaces the old one.
+    exported["devices"][MAC_B]["fields"] = {"Long": "y" * 501, "Room": "Hall"}
+    res = await hass.services.async_call(DOMAIN, "import_config", {"data": exported}, blocking=True, return_response=True)
+    await hass.async_block_till_done()
+    assert res["skipped"] == 1
+    assert entry.options["devices"][MAC_B]["fields"] == {"Room": "Hall"}
+
+
 async def test_managed_by_and_fields(hass: HomeAssistant, fake_net) -> None:
     """Free text on devices and hubs: services, attributes, export/import and the options flow."""
     fake_net.alive = {GATEWAY, "192.0.2.11"}
