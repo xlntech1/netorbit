@@ -1172,7 +1172,19 @@ const BASE = (process.env.NETORBIT_PREVIEW || "http://localhost:8766").replace(/
     const key = (l) => bp.evaluate((x) => Object.values(window.NETORBIT_SCENARIOS.chain).find((s) => s.attributes.label === x).attributes.node_key, l);
     const crumbs = () => cb.locator(".crumbs").count().then((n) => (n ? cb.locator(".crumbs").innerText().then((t) => t.replace(/\s+/g, " ").trim()) : ""));
     const press = async (label) => {
-      const b = await cb.locator(`.node[data-key="${await key(label)}"] circle.disc`).boundingBox();
+      // Measure the hub only once the card has stopped moving. A redraw (closing a popup, say) can grow the header a
+      // moment later, as its icons render, and push the map down: on CI the card grew 37 px within 20 ms of the
+      // press, so a hub measured before that was pressed above its disc and the long-press never started.
+      const disc = cb.locator(`.node[data-key="${await key(label)}"] circle.disc`);
+      const frames = () => bp.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      let b = await disc.boundingBox();
+      for (let i = 0; i < 20; i++) {
+        await frames();
+        await bp.waitForTimeout(50);
+        const n = await disc.boundingBox();
+        if (n.x === b.x && n.y === b.y) break;
+        b = n;
+      }
       await bp.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
       await bp.mouse.down();
       await bp.waitForTimeout(750);

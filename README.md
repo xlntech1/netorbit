@@ -106,6 +106,8 @@ Tip for two devices that look the same, such as two from the same maker: power o
 | Netgear/Orbi with the Netgear integration | Suggested | Automatically, once you enable its "connected AP" sensors |
 | eero, Google/Nest Wifi, Deco, Velop, ISP routers | Suggested | By you: drag and drop, paste a list, or an AI assistant |
 
+From Home Assistant 2026.11, the UniFi integration adds new clients' device trackers turned off. NetOrbit reads a wireless client's access point from its tracker, so turn on the trackers of the clients you want placed.
+
 How to turn each of these on, step by step: [docs/SETUP.md](docs/SETUP.md).
 
 Placement you choose always wins over automatic placement. Each device shows how it was placed, and *Automatic* hands it back to NetOrbit.
