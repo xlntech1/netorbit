@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A card removed from the page with a popup open lets go of that popup's listeners and timer at once, instead of up to two minutes later (#87).
+
 ## 0.4.0b1
 
 ### Added

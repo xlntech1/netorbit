@@ -2576,6 +2576,18 @@ class NetOrbitCard extends HTMLElement {
     else idle();
   }
 
+  // Taken off the page (the dashboard was edited, another view opened): close any popup now, so its listeners on
+  // the page and its idle timer go with it instead of up to NO_POP_IDLE_MS later, and a removed card no longer
+  // reacts to taps. No redraw here: a card put back on the page draws again from its next update.
+  disconnectedCallback() {
+    if (this._popOff) this._popOff();
+    const old = this.shadowRoot && this.shadowRoot.querySelector(".pop");
+    if (old) old.remove();
+    this._liveDetails = null;
+    this._popOpen = false;
+    this._sig = "";
+  }
+
   // `later`: redraw after the current event has been handled, and not at all if it opened another popup.
   _closePop(wrap, later = false) {
     if (this._popOff) this._popOff();

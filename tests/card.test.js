@@ -576,6 +576,36 @@ test("a node popup closes on a tap outside, on Escape and when left alone; unsav
   }
 });
 
+test("a card taken off the page lets go of its popup at once (#87)", () => {
+  const saved = { document: globalThis.document, setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const on = {};
+  const timers = [];
+  globalThis.document = { addEventListener: (t, f) => (on[t] = f), removeEventListener: (t, f) => { if (on[t] === f) delete on[t]; } };
+  globalThis.setTimeout = (f, ms) => timers.push({ f, ms });
+  globalThis.clearTimeout = (id) => { if (id) timers[id - 1].f = null; };
+  try {
+    const l = {};
+    const pop = { isConnected: true, addEventListener: (t, f) => (l[t] = f), remove() { this.isConnected = false; } };
+    const card = new globalThis.NetOrbitCard();
+    let redraws = 0;
+    Object.defineProperty(card, "hass", { get: () => undefined, set: () => redraws++ });
+    card.shadowRoot = { querySelector: (sel) => (sel === ".pop" && pop.isConnected ? pop : null) };
+    card._popOpen = true;
+    card._liveDetails = { key: "d1" };
+    card._popAway(pop, { querySelector: () => (pop.isConnected ? pop : null) });
+    assert.ok(on.click && on.keydown && on.pointerup && on.pointercancel, "an open popup listens on the page");
+    l.pointerdown({});
+    card.disconnectedCallback();
+    assert.deepStrictEqual(Object.keys(on), [], "no listeners left on the page");
+    assert.ok(timers.every((x) => !x.f || x.ms === 0), "the idle timer is cleared");
+    assert.ok(!pop.isConnected && !card._popOpen && !card._popOff && !card._liveDetails && !card._popPressed, "the popup is gone");
+    assert.strictEqual(redraws, 0, "a card off the page doesn't redraw");
+    card.disconnectedCallback(); // again, or with no popup: nothing to do
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+});
+
 test("the details popup lets the map update and opens again from the new data; forms and presses hold updates", () => {
   const st = (id, attrs, state = "online") => ({ entity_id: id, state, attributes: Object.assign({ netorbit: true }, attrs) });
   const PC = "00:00:5e:00:53:10";
