@@ -86,6 +86,38 @@ async def test_name_set_from_the_card_sticks_across_an_ip_change_and_clears(hass
     assert _node_states(hass)[automatic].entity_id == entity_id
 
 
+async def test_lookup_by_ip_finds_the_device_that_has_it_now(hass: HomeAssistant, fake_net, freezer) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.10"}
+    fake_net.arp = {"192.0.2.10": TV}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+    coord = entry.runtime_data
+    assert coord.resolve_device("192.0.2.10") == TV
+
+    # The TV leaves and DHCP hands its address to a new device. Services and assistant tools given
+    # that address act on the new device, and the TV no longer shows the address as its own.
+    fake_net.arp = {"192.0.2.10": NEW}
+    await advance(hass, freezer, 301)
+    assert coord.resolve_device("192.0.2.10") == NEW
+    nodes = _node_states(hass)
+    assert nodes["Device 53:30"].attributes["ip"] == "192.0.2.10"
+    assert nodes["Device 53:10"].attributes["ip"] is None
+
+
+async def test_device_keeps_its_ip_while_arp_still_lists_its_mac_there(hass: HomeAssistant, fake_net, freezer) -> None:
+    fake_net.alive = {GATEWAY, "192.0.2.10"}
+    fake_net.arp = {"192.0.2.10": TV}
+    entry = _entry("auto")
+    await _setup(hass, entry)
+
+    # ARP now lists the address under two MACs at once (a bridge on a second interface, say), the
+    # other one last. The TV is still there, so it keeps its address.
+    fake_net.arp = {"192.0.2.10": NEW}
+    fake_net.arp_also = {"192.0.2.10": [TV]}
+    await advance(hass, freezer, 301)
+    assert _node_states(hass)["Device 53:10"].attributes["ip"] == "192.0.2.10"
+
+
 async def test_device_added_by_ip_switches_to_its_mac(hass: HomeAssistant, fake_net, freezer) -> None:
     fake_net.alive = {GATEWAY}
     fake_net.arp = {}
