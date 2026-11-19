@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .detect import NETWORK_DOMAINS
-from .logic import normalize_mac, ping_label, useful_name
+from .logic import normalize_mac, ping_label, tracker_label, useful_name
 
 
 @dataclass
@@ -19,6 +19,9 @@ class RegistryInfo:
     model: str | None
     manufacturer: str | None
     domain: str | None
+    # Only a device tracker's own device knows this MAC: its maker and model are kept, but it
+    # says nothing about whether the client is network gear.
+    tracker_only: bool = False
 
 
 def _entry_ids(dev: dr.DeviceEntry) -> list[str]:
@@ -45,23 +48,53 @@ def _all_devices(reg: dr.DeviceRegistry) -> list[dr.DeviceEntry]:
     return entries
 
 
+def _is_tracker_only(ent_reg: er.EntityRegistry, dev: dr.DeviceEntry) -> bool:
+    """Whether a device holds nothing but device trackers (turned on or off).
+
+    From Home Assistant 2026.11 every network-scanner tracker (UniFi, Nmap and other
+    router integrations) gets a device of its own, named by that integration after an
+    alias, a hostname or the maker plus part of the MAC, and most of these trackers start
+    turned off. Such a device says nothing about what the client is, so it must not make
+    a client look like network gear or outrank the name NetOrbit found for it.
+    """
+    entities = er.async_entries_for_device(ent_reg, dev.id, include_disabled_entities=True)
+    return bool(entities) and all(ent.domain == "device_tracker" for ent in entities)
+
+
+def _device_domain(hass: HomeAssistant, dev: dr.DeviceEntry) -> str | None:
+    """The integration a device belongs to, preferring network integrations."""
+    domain = None
+    for entry_id in _entry_ids(dev):
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry and entry.domain in NETWORK_DOMAINS:
+            return entry.domain
+        if entry and domain is None and entry.domain != "netorbit":
+            domain = entry.domain
+    return domain
+
+
 def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
     """Every device in Home Assistant that has a MAC connection, keyed by MAC."""
-    reg = dr.async_get(hass)
+    reg, ent_reg = dr.async_get(hass), er.async_get(hass)
     out: dict[str, RegistryInfo] = {}
+    trackers: dict[str, RegistryInfo] = {}
     for dev in _all_devices(reg):
         macs = [normalize_mac(v) for k, v in dev.connections if k == dr.CONNECTION_NETWORK_MAC]
         macs = [m for m in macs if m]
         if not macs:
             continue
-        domain = None
-        for entry_id in _entry_ids(dev):
-            entry = hass.config_entries.async_get_entry(entry_id)
-            if entry and entry.domain in NETWORK_DOMAINS:
-                domain = entry.domain
-                break
-            if entry and domain is None and entry.domain != "netorbit":
-                domain = entry.domain
+        domain = _device_domain(hass, dev)
+        if _is_tracker_only(ent_reg, dev):
+            # Of the name only one the user gave the tracker's device counts. The tracker's own
+            # name still comes through `tracker_names_by_mac` while the tracker is on.
+            info = RegistryInfo(useful_name(dev.name_by_user), dev.model, dev.manufacturer, domain, tracker_only=True)
+            for mac in macs:
+                old = trackers.get(mac)
+                trackers[mac] = info if old is None else RegistryInfo(
+                    old.name or info.name, old.model or info.model,
+                    old.manufacturer or info.manufacturer, old.domain or info.domain, tracker_only=True,
+                )
+            continue
         info = RegistryInfo(
             name=useful_name(dev.name_by_user) or useful_name(dev.name),
             model=dev.model, manufacturer=dev.manufacturer, domain=domain,
@@ -79,6 +112,14 @@ def registry_by_mac(hass: HomeAssistant) -> dict[str, RegistryInfo]:
             elif old.name is None and info.name:
                 out[mac] = RegistryInfo(info.name, old.model or info.model,
                                         old.manufacturer or info.manufacturer, old.domain)
+    # A tracker's device only fills in what no other device says about the MAC.
+    for mac, info in trackers.items():
+        old = out.get(mac)
+        if old is None:
+            out[mac] = info
+        else:
+            out[mac] = RegistryInfo(old.name or info.name, old.model or info.model,
+                                    old.manufacturer or info.manufacturer, old.domain)
     return out
 
 
@@ -89,7 +130,7 @@ def tracker_names_by_mac(hass: HomeAssistant) -> dict[str, str]:
         mac = normalize_mac(state.attributes.get("mac"))
         if not mac:
             continue
-        name = useful_name(state.attributes.get("friendly_name")) or useful_name(state.attributes.get("host_name"))
+        name = tracker_label(state.attributes.get("friendly_name")) or tracker_label(state.attributes.get("host_name"))
         if name:
             out.setdefault(mac, name)
     return out

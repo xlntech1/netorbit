@@ -21,7 +21,9 @@ concurrency:
 jobs:
   home-assistant:
     name: Home Assistant ${{ matrix.ha }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright downloads a WebKit build for the host's Ubuntu release, so moving ubuntu-latest
+    # (24.04 to 26.04 in Nov 2026) left WebKit asking for libraries the new image doesn't have.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # A broken beta shows up as a warning on the run without blocking anything.
     continue-on-error: ${{ matrix.ha == 'beta' }}
@@ -61,13 +63,45 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
+          # The cached browsers are built for one Ubuntu release. Keep the release in the key, and change it
+          # with runs-on, so a runner move downloads matching builds instead of restoring ones that can't load.
+          key: playwright-ubuntu-24.04-${{ hashFiles('scripts/ci/requirements_e2e.txt') }}
+      # The Ubuntu mirror often trickles the browsers' system packages until the job times out. Keep the .deb
+      # files apt downloads in the cache, so a run installs them from disk and only fetches what Ubuntu has since
+      # updated. The month in the key refreshes the set, and restore-keys starts each month from the last one.
+      - name: Name the month for the apt package cache
+        id: month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache the browser system packages
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-debs
+          key: apt-debs-ubuntu-24.04-chromium-webkit-${{ steps.month.outputs.month }}
+          restore-keys: apt-debs-ubuntu-24.04-chromium-webkit-
+      - name: Make apt fail fast on a stalled mirror, and hand it the cached packages
+        # Time out a stalled download and retry it instead of hanging, and keep what apt downloads so it can be
+        # cached. A package already in /var/cache/apt/archives at the version apt wants is not downloaded again.
+        run: |
+          printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "3";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' | sudo tee /etc/apt/apt.conf.d/99ci-apt
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
+          mkdir -p ~/apt-debs
+          if compgen -G "$HOME/apt-debs/*.deb" > /dev/null; then sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/; fi
+          echo "apt: $(ls ~/apt-debs | wc -l) cached packages"
       - name: Install Chromium and WebKit
         if: steps.browsers.outputs.cache-hit != 'true'
+        timeout-minutes: 8
         run: python -m playwright install --with-deps chromium webkit
       - name: Install browser system libraries
         if: steps.browsers.outputs.cache-hit == 'true'
+        timeout-minutes: 8
         run: python -m playwright install-deps chromium webkit
+      - name: Keep the downloaded packages for the cache
+        # autoclean drops versions Ubuntu no longer serves, so the cached set doesn't grow month to month.
+        run: |
+          sudo apt-get autoclean -qq
+          rm -f ~/apt-debs/*.deb
+          cp /var/cache/apt/archives/*.deb ~/apt-debs/ 2>/dev/null || true
+          echo "$(ls ~/apt-debs | wc -l) packages to cache"
 
       - name: Onboard, add NetOrbit and check the card in Chromium and WebKit
         run: python scripts/ci/ha_e2e.py run --url http://localhost:8123 --out e2e-artifacts

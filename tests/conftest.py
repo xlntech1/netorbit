@@ -34,6 +34,7 @@ class FakeNet:
     def __init__(self) -> None:
         self.alive: set[str] = set()
         self.arp: dict[str, str] = {}
+        self.arp_also: dict[str, list[str]] = {}  # ip -> MACs ARP lists for it before arp[ip] (a second interface)
         # SNMP: ip -> (community, ProbeResult) and ip -> {mac: port}
         self.snmp: dict[str, tuple[str, object]] = {}
         self.tables: dict[str, dict[str, int]] = {}
@@ -65,6 +66,9 @@ class FakeNet:
     async def mdns_name(self, ip, timeout=1.0):
         return self.mdns.get(ip)
 
+    def arp_all(self) -> dict[str, list[str]]:
+        return {ip: [*self.arp_also.get(ip, []), mac] for ip, mac in self.arp.items()}
+
     async def multiping(self, addresses, **kwargs):
         return [FakeHost(a, a in self.alive) for a in addresses]
 
@@ -83,6 +87,7 @@ def fake_net():
         patch("icmplib.async_multiping", side_effect=multiping),
         patch("icmplib.async_ping", side_effect=net.ping),
         patch("custom_components.netorbit.coordinator._read_arp", side_effect=lambda: dict(net.arp)),
+        patch("custom_components.netorbit.coordinator._read_arp_all", side_effect=net.arp_all),
         patch("custom_components.netorbit.coordinator._reverse_dns", side_effect=lambda ip: net.dns.get(ip)),
         patch("custom_components.netorbit.coordinator.mdns_name", side_effect=net.mdns_name),
         patch("aiooui.is_loaded", return_value=True),
