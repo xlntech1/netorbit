@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- A field label with a colon is refused, since the popup and the settings form split each line at the first colon. Saving only the fields in the details popup no longer cuts a hub name longer than 64 characters, and a reverse lookup that times out keeps the DNS name and hostname until the next look instead of dropping one (#62).
+
 ## 0.4.0b1
 
 ### Added

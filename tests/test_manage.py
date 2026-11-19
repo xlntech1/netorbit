@@ -33,7 +33,13 @@ def test_set_fields_limits():
         manage.set_fields(cfg, None, {f"f{i}": "v" for i in range(21)})
     with pytest.raises(manage.ManageError):
         manage.set_fields(cfg, None, ["not", "a", "mapping"])
+    with pytest.raises(manage.ManageError, match="':'"):
+        manage.set_fields(cfg, None, {"Port 1:2": "uplink"})
     assert cfg == {}
+    # One saved before the check can still be removed.
+    cfg = {"fields": {"Port 1:2": "uplink", "Rack": "2"}}
+    manage.set_fields(cfg, None, {"Port 1:2": None})
+    assert cfg == {"fields": {"Rack": "2"}}
 
 
 def test_stored_text_leaves_out_what_is_not_text():

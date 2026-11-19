@@ -58,6 +58,9 @@ def set_fields(cfg: dict[str, Any], managed_by: str | None = None, fields: dict[
             if not value:
                 current.pop(label, None)
                 continue
+            # Fields are written "Label: value" in the popup and the settings form, split at the first colon.
+            if ":" in label:
+                raise ManageError(f"Field name '{label[:20]}' can't contain ':'")
             if len(value) > MAX_FIELD_VALUE:
                 raise ManageError(f"Field '{label}' is longer than {MAX_FIELD_VALUE} characters")
             current[label] = value
