@@ -83,6 +83,7 @@ from .logic import (
     keys_answering,
     normalize_mac,
     parse_proc_arp,
+    parse_proc_arp_all,
     rollup_status,
     short_hostname,
     subnet_hosts,
@@ -404,7 +405,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             replied = {h.address for h in results if h.is_alive}
             gateway = self.config_entry.data[CONF_GATEWAY]
             self.set_scan(phase="arp", found=len(replied - {gateway}))
-            arp = await self.hass.async_add_executor_job(_read_arp)
+            arp_all = await self.hass.async_add_executor_job(_read_arp_all)
+            arp = {ip: macs[-1] for ip, macs in arp_all.items()}
             # A machine never has an ARP entry for its own address, so add the host Home
             # Assistant runs on from its own network adapters.
             local = await self._local_addresses()
@@ -444,6 +446,18 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
                 rec["ip"] = ip
                 if ip in replied:
                     rec["last_seen"] = now.isoformat()
+            # An address ARP now shows on another MAC is no longer this device's. The ping round
+            # already credits a reply only to the MAC that answered, but the departed record kept
+            # the address, so a lookup by IP (services, assistant tools) found it first. ARP can
+            # list one address under two MACs at once, so a device keeps it while its MAC is
+            # still among them.
+            owners: dict[str, set[str]] = {}
+            for mac, ip in mac_ip.items():
+                owners.setdefault(ip, set()).update(arp_all.get(ip, ()), (mac,))
+            for key, rec in self._seen.items():
+                rec_ip, rec_mac = rec.get("ip"), rec.get("mac")
+                if rec_ip and rec_mac and not key.startswith("hub:") and rec_ip in owners and rec_mac not in owners[rec_ip]:
+                    rec.pop("ip", None)
             if changed:
                 self._commit(opts)
 
@@ -807,6 +821,8 @@ class NetOrbitCoordinator(DataUpdateCoordinator[NetOrbitData]):
             if mac in dismissed or mac in ignored or self._is_hub_address(mac, rec.get("ip")):
                 continue
             reg = self._registry.get(mac)
+            if reg and reg.tracker_only:
+                reg = None
             snmp = rec.get("snmp") or {}
             ev = Evidence(
                 mac=mac, ip=rec.get("ip"), hostname=rec.get("hostname"), vendor=rec.get("vendor"),
@@ -1296,6 +1312,14 @@ def _read_arp() -> dict[str, str]:
     try:
         with open("/proc/net/arp", encoding="ascii") as fh:
             return parse_proc_arp(fh.read())
+    except OSError:
+        return {}
+
+
+def _read_arp_all() -> dict[str, list[str]]:
+    try:
+        with open("/proc/net/arp", encoding="ascii") as fh:
+            return parse_proc_arp_all(fh.read())
     except OSError:
         return {}
 
