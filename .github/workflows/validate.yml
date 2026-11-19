@@ -1,7 +1,10 @@
 name: Validate
 
 on:
+  # Push only on main, as in e2e.yml: a branch with a PR already runs on pull_request, and its push run
+  # can't use the PR's browser cache, so it reinstalled WebKit from a slow mirror and timed out.
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 6 * * 1"
@@ -56,7 +59,9 @@ jobs:
 
   browser:
     name: Browser tests (${{ matrix.browser }})
-    runs-on: ubuntu-latest
+    # Pinned: Playwright downloads a WebKit build for the host's Ubuntu release, so moving ubuntu-latest
+    # (24.04 to 26.04 in Nov 2026) left WebKit asking for libraries the new image doesn't have.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -78,11 +83,30 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-1.63.0-${{ runner.os }}-${{ matrix.browser }}
-      - name: Make apt fail fast on a stalled mirror
-        # A slow Ubuntu mirror once trickled the WebKit libraries until the job timed out. Time out a stalled
-        # download and retry it instead, and cap the install steps, so a bad mirror fails within about 6 minutes.
-        run: printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "3";\n' | sudo tee /etc/apt/apt.conf.d/99ci-timeouts
+          # The cached browser is built for one Ubuntu release. Keep the release in the key, and change it
+          # with runs-on, so a runner move downloads a matching build instead of restoring one that can't load.
+          key: playwright-1.63.0-ubuntu-24.04-${{ matrix.browser }}
+      # The Ubuntu mirror often trickles the browsers' system packages until the job times out. Keep the .deb
+      # files apt downloads in the cache, so a run installs them from disk and only fetches what Ubuntu has since
+      # updated. The month in the key refreshes the set, and restore-keys starts each month from the last one.
+      - name: Name the month for the apt package cache
+        id: month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache the browser system packages
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-debs
+          key: apt-debs-ubuntu-24.04-${{ matrix.browser }}-${{ steps.month.outputs.month }}
+          restore-keys: apt-debs-ubuntu-24.04-${{ matrix.browser }}-
+      - name: Make apt fail fast on a stalled mirror, and hand it the cached packages
+        # Time out a stalled download and retry it instead of hanging, and keep what apt downloads so it can be
+        # cached. A package already in /var/cache/apt/archives at the version apt wants is not downloaded again.
+        run: |
+          printf 'Acquire::http::Timeout "20";\nAcquire::https::Timeout "20";\nAcquire::Retries "3";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\n' | sudo tee /etc/apt/apt.conf.d/99ci-apt
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
+          mkdir -p ~/apt-debs
+          if compgen -G "$HOME/apt-debs/*.deb" > /dev/null; then sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/; fi
+          echo "apt: $(ls ~/apt-debs | wc -l) cached packages"
       - name: Install the browser
         if: steps.browsers.outputs.cache-hit != 'true'
         timeout-minutes: 6
@@ -91,6 +115,13 @@ jobs:
         if: steps.browsers.outputs.cache-hit == 'true'
         timeout-minutes: 6
         run: npx playwright install-deps ${{ matrix.browser }}
+      - name: Keep the downloaded packages for the cache
+        # autoclean drops versions Ubuntu no longer serves, so the cached set doesn't grow month to month.
+        run: |
+          sudo apt-get autoclean -qq
+          rm -f ~/apt-debs/*.deb
+          cp /var/cache/apt/archives/*.deb ~/apt-debs/ 2>/dev/null || true
+          echo "$(ls ~/apt-debs | wc -l) packages to cache"
       - name: Serve the repository
         run: |
           python3 -m http.server 8766 > /dev/null 2>&1 &
